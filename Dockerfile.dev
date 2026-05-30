@@ -1,0 +1,15 @@
+# Development image — hot reload with volume mount
+FROM node:20-alpine
+
+RUN apk add --no-cache libc6-compat openssl
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+COPY prisma ./prisma
+# prisma/ must exist before npm ci (postinstall runs prisma generate)
+RUN npm ci
+
+EXPOSE 3000
+
+CMD ["sh", "-c", "npx prisma migrate deploy && npm run dev -- --hostname 0.0.0.0"]

@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.gitignore
+.env
+.env.*
+!.env.docker.example
+README.md
+ARCHITECTURE.md
+coverage
+*.md
+.DS_Store
+npm-debug.log*
+.vercel
+agent-transcripts
+terminals

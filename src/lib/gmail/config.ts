@@ -1,0 +1,40 @@
+const DEFAULT_SCOPES = [
+  "https://www.googleapis.com/auth/gmail.readonly",
+  "https://www.googleapis.com/auth/gmail.modify",
+  "https://www.googleapis.com/auth/gmail.send",
+  "https://www.googleapis.com/auth/userinfo.email",
+];
+
+export function getGoogleOAuthConfig() {
+  const clientId = process.env.GOOGLE_CLIENT_ID;
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
+  const redirectUri =
+    process.env.GOOGLE_REDIRECT_URI ??
+    `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/v1/integrations/gmail/callback`;
+
+  if (!clientId || !clientSecret) {
+    throw new Error(
+      "Google OAuth not configured. Set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in .env"
+    );
+  }
+
+  const scopesRaw = process.env.GOOGLE_GMAIL_SCOPES;
+  const scopes = scopesRaw
+    ? scopesRaw.replace(/^"|"$/g, "").split(/\s+/).filter(Boolean)
+    : DEFAULT_SCOPES;
+
+  return { clientId, clientSecret, redirectUri, scopes };
+}
+
+export function isGoogleOAuthConfigured(): boolean {
+  return Boolean(
+    process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET
+  );
+}
+
+export function getGmailSyncConfig() {
+  return {
+    batchSize: Number(process.env.GMAIL_SYNC_BATCH_SIZE ?? 50),
+    lockTtlMinutes: Number(process.env.GMAIL_SYNC_LOCK_TTL_MINUTES ?? 15),
+  };
+}

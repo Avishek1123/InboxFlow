@@ -1,0 +1,752 @@
+// InboxFlow AI — Multi-tenant schema with Gmail integration support
+// https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum OrganizationRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum AccountProvider {
+  GMAIL
+  WHATSAPP
+}
+
+enum ConnectedAccountStatus {
+  PENDING
+  ACTIVE
+  DISCONNECTED
+  ERROR
+  TOKEN_EXPIRED
+}
+
+enum SyncStatus {
+  IDLE
+  SYNCING
+  ERROR
+}
+
+enum SyncRunType {
+  FULL
+  INCREMENTAL
+}
+
+enum SyncRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+}
+
+enum MessageChannel {
+  GMAIL
+  WHATSAPP
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum AttachmentStorageStatus {
+  PENDING
+  STORED
+  FAILED
+  SKIPPED
+}
+
+enum WhatsAppMessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  STICKER
+  TEMPLATE
+  INTERACTIVE
+  LOCATION
+  CONTACTS
+  REACTION
+  UNKNOWN
+}
+
+enum MessageDeliveryStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum WhatsAppTemplateStatus {
+  APPROVED
+  PENDING
+  REJECTED
+  PAUSED
+  DISABLED
+  UNKNOWN
+}
+
+enum WebhookProvider {
+  GMAIL
+  WHATSAPP
+  STRIPE
+  CLERK
+}
+
+enum WebhookProcessingStatus {
+  PENDING
+  PROCESSING
+  PROCESSED
+  FAILED
+  DEAD_LETTER
+}
+
+enum OutboundJobStatus {
+  PENDING
+  PROCESSING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum OutboundJobType {
+  TEXT
+  TEMPLATE
+  MEDIA
+  INTERACTIVE
+}
+
+enum AiTaskType {
+  SUMMARIZE_EMAIL
+  SUMMARIZE_WHATSAPP
+  EXTRACT_LEAD
+  EXTRACT_ORDER
+  EXTRACT_INVOICE
+  SENTIMENT
+  INTENT
+  AUTO_REPLY
+  FULL_ANALYSIS
+}
+
+enum AiProviderName {
+  GROQ
+  GEMINI
+  OPENROUTER
+}
+
+enum AiExtractionStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  CACHED
+}
+
+enum AutomationStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum AutomationTriggerType {
+  NEW_GMAIL_EMAIL
+  NEW_WHATSAPP_MESSAGE
+  SCHEDULED_TIME
+  AI_EXTRACTION_COMPLETED
+}
+
+enum AutomationExecutionStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  RETRYING
+  CANCELLED
+}
+
+enum AutomationStepStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
+  SKIPPED
+}
+
+// ─── Core tenancy ────────────────────────────────────────────────────────────
+
+model User {
+  id          String   @id @default(cuid())
+  /// Legacy Clerk ID (deprecated)
+  clerkUserId String?  @unique
+  /// Firebase Authentication UID
+  firebaseUid String?  @unique
+  email       String
+  firstName   String?
+  lastName    String?
+  imageUrl    String?
+  phone       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  memberships       OrganizationMember[]
+  connectedAccounts ConnectedAccount[]
+
+  @@index([email])
+  @@index([phone])
+  @@map("users")
+}
+
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  slug      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  members           OrganizationMember[]
+  connectedAccounts ConnectedAccount[]
+  conversations     Conversation[]
+  messages          Message[]
+  syncRuns            GmailSyncRun[]
+  whatsappTemplates   WhatsAppTemplate[]
+  webhookLogs         WebhookLog[]
+  whatsappOutboundJobs WhatsAppOutboundJob[]
+  aiExtractions        AiExtraction[]
+  automations          Automation[]
+  automationExecutions AutomationExecution[]
+  contacts             Contact[]
+  automationDataRecords AutomationDataRecord[]
+  extractionTables      ExtractionTable[]
+  extractionTableRows   ExtractionTableRow[]
+
+  @@map("organizations")
+}
+
+model OrganizationMember {
+  id             String           @id @default(cuid())
+  organizationId String
+  userId         String
+  role           OrganizationRole @default(MEMBER)
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@index([userId])
+  @@map("organization_members")
+}
+
+// ─── Gmail / WhatsApp connections ────────────────────────────────────────────
+
+model ConnectedAccount {
+  id             String @id @default(cuid())
+  organizationId String
+  userId         String
+
+  provider AccountProvider
+  status   ConnectedAccountStatus @default(PENDING)
+
+  /// Gmail address or WhatsApp business phone (E.164)
+  accountEmail      String
+  /// Google `sub` or Meta `phone_number_id`
+  externalAccountId String
+
+  /// Meta WhatsApp Business Account ID (WABA)
+  whatsappBusinessAccountId String?
+  /// Meta App ID used for this connection
+  metaAppId                 String?
+  /// Per-account webhook verify token (AES-256-GCM ciphertext)
+  encryptedWebhookVerifyToken String? @db.Text
+
+  /// AES-256-GCM ciphertext (access token)
+  encryptedAccessToken  String?   @db.Text
+  /// AES-256-GCM ciphertext (refresh token)
+  encryptedRefreshToken String?   @db.Text
+  tokenExpiresAt        DateTime?
+  scopes                String[]  @default([])
+
+  /// Gmail incremental sync cursor (historyId from Gmail API)
+  gmailHistoryId String?
+  /// Last successful sync completion
+  lastSyncedAt   DateTime?
+  syncStatus     SyncStatus @default(IDLE)
+  syncError      String?    @db.Text
+  /// Lock: prevents overlapping sync workers
+  syncLockedAt   DateTime?
+  syncLockId     String?
+
+  metadata  Json?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization  Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
+  messages      Message[]
+  syncRuns            GmailSyncRun[]
+  whatsappTemplates   WhatsAppTemplate[]
+  webhookLogs         WebhookLog[]
+  whatsappOutboundJobs WhatsAppOutboundJob[]
+
+  /// One connected inbox per provider + account identifier per organization
+  @@unique([organizationId, provider, accountEmail])
+  @@index([organizationId, provider, status])
+  @@index([syncStatus, lastSyncedAt])
+  @@map("connected_accounts")
+}
+
+// ─── Unified inbox ───────────────────────────────────────────────────────────
+
+model Conversation {
+  id                String         @id @default(cuid())
+  organizationId    String
+  connectedAccountId String
+  channel           MessageChannel
+
+  /// Gmail threadId or WhatsApp customer `wa_id` (conversation key)
+  externalThreadId  String
+  /// WhatsApp customer phone (E.164) — primary participant
+  participantPhone  String?
+  participantName   String?
+  subject           String?
+  snippet           String?   @db.Text
+  participantEmails Json      @default("[]")
+  lastMessageAt    DateTime?
+  isArchived       Boolean   @default(false)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  connectedAccount ConnectedAccount @relation(fields: [connectedAccountId], references: [id], onDelete: Cascade)
+  messages         Message[]
+
+  @@unique([connectedAccountId, externalThreadId])
+  @@index([organizationId, channel, lastMessageAt(sort: Desc)])
+  @@map("conversations")
+}
+
+model Message {
+  id                 String           @id @default(cuid())
+  organizationId     String
+  conversationId     String
+  connectedAccountId String
+  channel            MessageChannel
+  direction          MessageDirection @default(INBOUND)
+
+  /// Provider message id (Gmail id / WhatsApp `wamid`)
+  externalId       String
+  externalThreadId String
+
+  whatsappMessageType WhatsAppMessageType?
+  deliveryStatus      MessageDeliveryStatus?
+  /// WhatsApp reply context — parent wamid
+  replyToExternalId   String?
+  /// Raw webhook/API payload for debugging
+  rawPayload          Json?
+
+  fromAddress  String
+  toAddresses  Json    @default("[]")
+  ccAddresses  Json    @default("[]")
+  bccAddresses Json    @default("[]")
+  subject      String?
+  bodyText     String? @db.Text
+  bodyHtml     String? @db.Text
+
+  receivedAt    DateTime
+  isRead        Boolean  @default(false)
+  hasAttachments Boolean @default(false)
+  /// Gmail label IDs
+  labels        Json     @default("[]")
+  /// SHA-256 of normalized body + subject for secondary dedup guard
+  contentHash   String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  conversation     Conversation        @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  connectedAccount ConnectedAccount    @relation(fields: [connectedAccountId], references: [id], onDelete: Cascade)
+  attachments      MessageAttachment[]
+  aiExtractions         AiExtraction[]
+  extractionTableRows   ExtractionTableRow[]
+
+  /// Primary deduplication: same Gmail message cannot be inserted twice per account
+  @@unique([connectedAccountId, externalId])
+  @@index([organizationId, channel, receivedAt(sort: Desc)])
+  @@index([conversationId, receivedAt(sort: Desc)])
+  @@index([contentHash])
+  @@map("messages")
+}
+
+model MessageAttachment {
+  id        String @id @default(cuid())
+  messageId String
+
+  /// Gmail attachmentId or WhatsApp media id
+  externalId String
+  filename   String
+  mimeType   String
+  sizeBytes  Int
+  /// WhatsApp CDN URL (expires; refresh via media API)
+  whatsappMediaUrl String?
+
+  storageStatus AttachmentStorageStatus @default(PENDING)
+  /// Object key in blob storage (Vercel Blob / S3)
+  storageKey    String?
+  storageUrl    String?
+  checksum      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  message Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  @@unique([messageId, externalId])
+  @@index([storageStatus])
+  @@map("message_attachments")
+}
+
+// ─── Gmail sync observability ──────────────────────────────────────────────────
+
+model GmailSyncRun {
+  id                 String @id @default(cuid())
+  organizationId     String
+  connectedAccountId String
+
+  type   SyncRunType
+  status SyncRunStatus @default(PENDING)
+
+  messagesFetched   Int @default(0)
+  messagesCreated   Int @default(0)
+  messagesSkipped   Int @default(0)
+  attachmentsStored Int @default(0)
+  attachmentsFailed Int @default(0)
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  errorCode   String?
+  errorMessage String?  @db.Text
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  connectedAccount ConnectedAccount @relation(fields: [connectedAccountId], references: [id], onDelete: Cascade)
+
+  @@index([connectedAccountId, startedAt(sort: Desc)])
+  @@index([status, startedAt])
+  @@map("gmail_sync_runs")
+}
+
+// ─── WhatsApp Business Cloud API ───────────────────────────────────────────────
+
+model WhatsAppTemplate {
+  id                 String @id @default(cuid())
+  organizationId     String
+  connectedAccountId String
+
+  /// Meta template name (unique per WABA + language)
+  name     String
+  language String
+  category String?
+  status   WhatsAppTemplateStatus @default(UNKNOWN)
+
+  /// Header / body / buttons structure from Graph API
+  components Json?
+  externalId String?
+
+  lastSyncedAt DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  connectedAccount ConnectedAccount @relation(fields: [connectedAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([connectedAccountId, name, language])
+  @@index([organizationId, status])
+  @@map("whatsapp_templates")
+}
+
+model WebhookLog {
+  id                 String  @id @default(cuid())
+  organizationId     String?
+  connectedAccountId String?
+
+  provider WebhookProvider
+  eventType String
+
+  /// Meta `X-Hub-Signature-256` validation result
+  signatureValid Boolean @default(false)
+  /// Idempotency: WhatsApp `entry[].id` + change field hash
+  idempotencyKey String
+
+  payload Json
+  status  WebhookProcessingStatus @default(PENDING)
+
+  retryCount  Int       @default(0)
+  maxRetries  Int       @default(5)
+  nextRetryAt DateTime?
+  processedAt DateTime?
+  errorCode   String?
+  errorMessage String?  @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization     Organization?     @relation(fields: [organizationId], references: [id], onDelete: SetNull)
+  connectedAccount ConnectedAccount? @relation(fields: [connectedAccountId], references: [id], onDelete: SetNull)
+
+  @@unique([provider, idempotencyKey])
+  @@index([status, nextRetryAt])
+  @@index([connectedAccountId, createdAt(sort: Desc)])
+  @@map("webhook_logs")
+}
+
+model WhatsAppOutboundJob {
+  id                 String @id @default(cuid())
+  organizationId     String
+  connectedAccountId String
+
+  type   OutboundJobType
+  status OutboundJobStatus @default(PENDING)
+
+  /// Recipient wa_id / E.164 without +
+  recipientPhone String
+  /// Serialized Cloud API request body
+  payload Json
+
+  /// Assigned after successful send
+  externalMessageId String?
+  lastError         String?  @db.Text
+  retryCount        Int      @default(0)
+  maxRetries        Int      @default(5)
+  nextRetryAt       DateTime?
+  sentAt            DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization     Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  connectedAccount ConnectedAccount @relation(fields: [connectedAccountId], references: [id], onDelete: Cascade)
+
+  @@index([status, nextRetryAt])
+  @@index([connectedAccountId, createdAt(sort: Desc)])
+  @@map("whatsapp_outbound_jobs")
+}
+
+// ─── AI extraction & usage ─────────────────────────────────────────────────────
+
+model AiExtraction {
+  id             String  @id @default(cuid())
+  organizationId String
+  messageId      String?
+
+  taskType AiTaskType
+  channel  MessageChannel?
+  status   AiExtractionStatus @default(PENDING)
+
+  provider   AiProviderName?
+  model      String?
+  latencyMs  Int?
+  inputChars Int?
+  /// Estimated token usage for cost tracking
+  inputTokens  Int?
+  outputTokens Int?
+
+  /// SHA-256 of normalized input — cache deduplication
+  contentHash String?
+  /// Structured JSON result
+  result      Json?
+  errorCode   String?
+  errorMessage String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  message      Message?     @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@unique([organizationId, messageId, taskType, contentHash])
+  @@index([organizationId, taskType, createdAt(sort: Desc)])
+  @@index([contentHash])
+  @@map("ai_extractions")
+}
+
+// ─── Automations (Zapier-style workflows) ──────────────────────────────────────
+
+model Automation {
+  id             String @id @default(cuid())
+  organizationId String
+
+  name        String
+  description String?
+  status      AutomationStatus @default(DRAFT)
+  triggerType AutomationTriggerType
+
+  /// React Flow graph: { nodes, edges, viewport }
+  graph   Json
+  version Int    @default(1)
+
+  /// Schedule cron expression (for SCHEDULED_TIME trigger)
+  cronExpression String?
+  timezone       String?  @default("UTC")
+
+  runCount      Int       @default(0)
+  lastRunAt     DateTime?
+  lastError     String?   @db.Text
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  organization Organization           @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  executions   AutomationExecution[]
+
+  @@index([organizationId, status])
+  @@index([organizationId, triggerType, status])
+  @@map("automations")
+}
+
+model AutomationExecution {
+  id             String @id @default(cuid())
+  organizationId String
+  automationId   String
+
+  status        AutomationExecutionStatus @default(PENDING)
+  triggerType   AutomationTriggerType
+  triggerPayload Json
+  /// Accumulated variables passed between nodes
+  context       Json     @default("{}")
+
+  retryCount  Int       @default(0)
+  maxRetries  Int       @default(3)
+  nextRetryAt DateTime?
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+  errorCode   String?
+  errorMessage String?  @db.Text
+
+  organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  automation   Automation                @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  steps        AutomationExecutionStep[]
+
+  @@index([automationId, startedAt(sort: Desc)])
+  @@index([organizationId, status, startedAt(sort: Desc)])
+  @@index([status, nextRetryAt])
+  @@map("automation_executions")
+}
+
+model AutomationExecutionStep {
+  id          String @id @default(cuid())
+  executionId String
+
+  nodeId   String
+  nodeType String
+  label    String?
+  status   AutomationStepStatus @default(PENDING)
+
+  input  Json?
+  output Json?
+  errorMessage String? @db.Text
+  latencyMs    Int?
+
+  startedAt   DateTime  @default(now())
+  completedAt DateTime?
+
+  execution AutomationExecution @relation(fields: [executionId], references: [id], onDelete: Cascade)
+
+  @@index([executionId, startedAt])
+  @@map("automation_execution_steps")
+}
+
+model Contact {
+  id             String @id @default(cuid())
+  organizationId String
+
+  name    String?
+  email   String?
+  phone   String?
+  company String?
+  source  String?
+  metadata Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, email])
+  @@index([organizationId, phone])
+  @@map("contacts")
+}
+
+model AutomationDataRecord {
+  id             String @id @default(cuid())
+  organizationId String
+  automationId   String?
+  executionId    String?
+
+  key   String
+  value Json
+
+  createdAt DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, key])
+  @@index([executionId])
+  @@map("automation_data_records")
+}
+
+// ─── AI custom extraction tables ───────────────────────────────────────────────
+
+model ExtractionTable {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?  @db.Text
+  /// [{ key, label, hint? }]
+  columns        Json     @default("[]")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  rows         ExtractionTableRow[]
+
+  @@index([organizationId])
+  @@map("extraction_tables")
+}
+
+model ExtractionTableRow {
+  id             String  @id @default(cuid())
+  tableId        String
+  organizationId String
+  messageId      String?
+
+  /// { columnKey: extracted value }
+  values        Json
+  sourceSubject String?
+  sourceFrom    String?
+  sourceSnippet String? @db.Text
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  table        ExtractionTable @relation(fields: [tableId], references: [id], onDelete: Cascade)
+  organization Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  message      Message?        @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  @@unique([tableId, messageId])
+  @@index([tableId, createdAt(sort: Desc)])
+  @@map("extraction_table_rows")
+}

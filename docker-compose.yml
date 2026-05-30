@@ -1,0 +1,86 @@
+# InboxFlow AI — local development stack
+# Usage: docker compose up -d
+# App:    http://localhost:3001  (3000 if you stop local `npm run dev`)
+# DB:     localhost:5432 (inboxflow / inboxflow / inboxflow)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: inboxflow-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: inboxflow
+      POSTGRES_PASSWORD: inboxflow
+      POSTGRES_DB: inboxflow
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U inboxflow -d inboxflow"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: inboxflow-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    container_name: inboxflow-app
+    restart: unless-stopped
+    ports:
+      - "${APP_HOST_PORT:-3001}:3000"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NODE_ENV: development
+      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3001}
+      DATABASE_URL: postgresql://inboxflow:inboxflow@postgres:5432/inboxflow?schema=public
+      REDIS_URL: redis://redis:6379
+      CRON_SECRET: local-cron-secret
+    volumes:
+      - .:/app
+      - app_node_modules:/app/node_modules
+      - app_next:/app/.next
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  # One-off migration (optional): docker compose run --rm migrate
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL: postgresql://inboxflow:inboxflow@postgres:5432/inboxflow?schema=public
+    volumes:
+      - .:/app
+      - app_node_modules:/app/node_modules
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: npx prisma migrate deploy
+
+volumes:
+  postgres_data:
+  redis_data:
+  app_node_modules:
+  app_next:
