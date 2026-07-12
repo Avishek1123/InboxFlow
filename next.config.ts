@@ -9,7 +9,8 @@ const nextConfig: NextConfig = {
     "@ngrok/ngrok",
     "localtunnel",
   ],
-  // Required for Firebase Google signInWithPopup — strict COOP blocks window.closed polling.
+  // Required for Firebase Google signInWithPopup.
+  // same-origin alone blocks window.closed; allow-popups is required.
   async headers() {
     return [
       {
@@ -18,6 +19,10 @@ const nextConfig: NextConfig = {
           {
             key: "Cross-Origin-Opener-Policy",
             value: "same-origin-allow-popups",
+          },
+          {
+            key: "Cross-Origin-Embedder-Policy",
+            value: "unsafe-none",
           },
         ],
       },

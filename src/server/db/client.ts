@@ -43,9 +43,9 @@ function resolvePrismaClient(): PrismaClient {
     );
   }
 
-  if (process.env.NODE_ENV !== "production") {
-    globalForPrisma.prisma = client;
-  }
+  // Always cache — without this, production creates a new client per query and
+  // exhausts Neon pooler connections (Server Components crash after sign-in).
+  globalForPrisma.prisma = client;
   return client;
 }
 
