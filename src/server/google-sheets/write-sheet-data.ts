@@ -10,6 +10,7 @@ export async function writePayloadToSpreadsheet(
   const meta = await sheets.spreadsheets.get({ spreadsheetId });
   const firstSheet = meta.data.sheets?.[0];
   const sheetId = firstSheet?.properties?.sheetId ?? 0;
+  const escapedTitle = sheetTitle.replace(/'/g, "''");
 
   await sheets.spreadsheets.batchUpdate({
     spreadsheetId,
@@ -25,6 +26,12 @@ export async function writePayloadToSpreadsheet(
     },
   });
 
+  // Clear old data so non-matching rows (e.g. unstarred) do not linger.
+  await sheets.spreadsheets.values.clear({
+    spreadsheetId,
+    range: `'${escapedTitle}'`,
+  });
+
   const rows: string[][] = [payload.headers];
   for (const row of payload.rows) {
     rows.push(payload.headers.map((h) => row[h] ?? ""));
@@ -34,7 +41,7 @@ export async function writePayloadToSpreadsheet(
 
   await sheets.spreadsheets.values.update({
     spreadsheetId,
-    range: `'${sheetTitle.replace(/'/g, "''")}'!A1`,
+    range: `'${escapedTitle}'!A1`,
     valueInputOption: "RAW",
     requestBody: { values: rows },
   });

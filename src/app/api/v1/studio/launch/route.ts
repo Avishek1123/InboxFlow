@@ -10,6 +10,7 @@ import {
   parseSheetTitleFromPrompt,
   sanitizeSheetTitle,
 } from "@/lib/studio/parse-sheet-title";
+import { promptRequestsStarredOnly } from "@/lib/studio/parse-starred-only";
 import { startDevTunnelIfEnabled } from "@/server/dev-tunnel";
 import { ensureHealthyPublicAppUrl } from "@/server/dev-tunnel/ensure-healthy-public-url";
 import { hasReachablePublicAppUrl } from "@/lib/app-url";
@@ -88,6 +89,30 @@ function wireSheetIntoGraph(
   };
 }
 
+/** Force Gmail trigger nodes to starred-only when the user asked for it. */
+function wireStarredOnlyIntoGraph(graph: WorkflowGraph): WorkflowGraph {
+  return {
+    ...graph,
+    nodes: graph.nodes.map((n) => {
+      if (n.data.kind !== "NEW_GMAIL_EMAIL" && n.data.kind !== "MESSAGE_RECEIVED") {
+        return n;
+      }
+      return {
+        ...n,
+        data: {
+          ...n.data,
+          config: {
+            ...n.data.config,
+            filterPresetIds: ["STARRED"],
+            filterMode: "any",
+            filterLabels: [],
+          },
+        },
+      };
+    }),
+  };
+}
+
 function requiredIntegrations(graph: WorkflowGraph): Array<"GMAIL" | "WHATSAPP" | "TWILIO"> {
   const set = new Set<"GMAIL" | "WHATSAPP" | "TWILIO">();
   for (const node of graph.nodes) {
@@ -119,6 +144,20 @@ export async function POST(request: Request) {
       organizationId: organization.id,
       prompt: parsed.data.prompt,
     });
+
+    const starredOnly = promptRequestsStarredOnly(parsed.data.prompt);
+    if (starredOnly) {
+      draft.graph = wireStarredOnlyIntoGraph(draft.graph);
+      const gmailForFilters = await gmailRepository.findGmailAccount(
+        organization.id
+      );
+      if (gmailForFilters) {
+        await gmailRepository.updateTriggerFilters(gmailForFilters.id, {
+          filterIds: ["STARRED"],
+          mode: "any",
+        });
+      }
+    }
 
     const syncMinutes = Math.max(
       1,

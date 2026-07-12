@@ -45,6 +45,7 @@ ${catalogText()}
 Rules:
 - Include exactly one primary trigger and at least one action.
 - Prefer MESSAGE_RECEIVED or NEW_GMAIL_EMAIL for inbound.
+- If the user says starred / is:starred / only starred emails, set the Gmail trigger config to {"filterPresetIds":["STARRED"],"filterMode":"any"} and do not include INBOX.
 - Use RUN_AGENT for open-ended goals, REQUEST_APPROVAL before customer sends.
 - Use EXTRACT_TO_TABLE / SHEETS_UPSERT for sheet pipelines.
 - If the user asks for a sync/timer interval (e.g. every 5 minutes), set "sheetSyncMinutes" to that number (1-60). Convert seconds to whole minutes (minimum 1).
