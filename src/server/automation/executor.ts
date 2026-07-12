@@ -1,11 +1,16 @@
-import type { Automation, Prisma } from "@prisma/client";
+import type { Automation, AutomationTriggerType, Prisma } from "@prisma/client";
 import type {
   AutomationTriggerPayload,
   ExecutionContext,
   WorkflowGraph,
 } from "@/types/automation";
-import { getExecutionOrder, validateGraph } from "./graph";
-import { executeAction } from "./handlers";
+import {
+  findTriggerNodesByKind,
+  getExecutionOrder,
+  getTriggerNodes,
+  validateGraph,
+} from "./graph";
+import { ApprovalRequiredError, executeAction } from "./handlers";
 import { AutomationEngineError } from "./errors";
 import { automationExecutionRepository } from "../repositories/automation-execution.repository";
 import { automationRepository } from "../repositories/automation.repository";
@@ -16,13 +21,33 @@ export class AutomationExecutor {
     automation: Automation;
     triggerPayload: AutomationTriggerPayload;
     executionId?: string;
+    triggerNodeId?: string;
+    triggerType?: AutomationTriggerType;
   }): Promise<string> {
     const graph = params.automation.graph as unknown as WorkflowGraph;
-    const { valid, errors, triggerNode } = validateGraph(graph);
+    const { valid, errors } = validateGraph(graph);
 
-    if (!valid || !triggerNode) {
+    if (!valid) {
       throw new AutomationEngineError("INVALID_GRAPH", errors.join("; "));
     }
+
+    const triggerNode = params.triggerNodeId
+      ? graph.nodes.find((n) => n.id === params.triggerNodeId)
+      : findTriggerNodesByKind(
+          graph,
+          params.triggerType ?? params.automation.triggerType
+        )[0] ?? getTriggerNodes(graph)[0];
+
+    if (!triggerNode) {
+      throw new AutomationEngineError(
+        "INVALID_GRAPH",
+        "No matching trigger node for this event"
+      );
+    }
+
+    const executionTriggerType =
+      params.triggerType ??
+      (triggerNode.data.kind as AutomationTriggerType);
 
     let executionId = params.executionId;
 
@@ -30,7 +55,7 @@ export class AutomationExecutor {
       const execution = await automationExecutionRepository.create({
         organizationId: params.automation.organizationId,
         automationId: params.automation.id,
-        triggerType: params.automation.triggerType,
+        triggerType: executionTriggerType,
         triggerPayload: params.triggerPayload as Prisma.InputJsonValue,
       });
       executionId = execution.id;
@@ -47,6 +72,38 @@ export class AutomationExecutor {
       const actionNodes = getExecutionOrder(graph, triggerNode.id);
 
       for (const node of actionNodes) {
+        if (context.variables.__skipRemaining === true) {
+          const step = await automationExecutionRepository.createStep({
+            executionId,
+            nodeId: node.id,
+            nodeType: node.data.kind,
+            label: node.data.label,
+          });
+          await automationExecutionRepository.updateStep(step.id, {
+            status: "SKIPPED",
+            output: { reason: "Skipped by prior condition" },
+          });
+          continue;
+        }
+
+        const onlyIf = node.data.config?.onlyIf;
+        if (onlyIf !== undefined && onlyIf !== null && onlyIf !== "") {
+          const flag = Boolean(context.variables[String(onlyIf)]);
+          if (!flag) {
+            const step = await automationExecutionRepository.createStep({
+              executionId,
+              nodeId: node.id,
+              nodeType: node.data.kind,
+              label: node.data.label,
+            });
+            await automationExecutionRepository.updateStep(step.id, {
+              status: "SKIPPED",
+              output: { reason: `onlyIf ${String(onlyIf)} was false` },
+            });
+            continue;
+          }
+        }
+
         const step = await automationExecutionRepository.createStep({
           executionId,
           nodeId: node.id,
@@ -79,6 +136,24 @@ export class AutomationExecutor {
             latencyMs: Date.now() - stepStart,
           });
         } catch (stepErr) {
+          if (stepErr instanceof ApprovalRequiredError) {
+            await automationExecutionRepository.updateStep(step.id, {
+              status: "COMPLETED",
+              output: {
+                approvalId: stepErr.approvalId,
+                waiting: true,
+                summary: stepErr.summary,
+              } as Prisma.InputJsonValue,
+              latencyMs: Date.now() - stepStart,
+            });
+            await automationExecutionRepository.markWaitingApproval(
+              executionId,
+              context,
+              stepErr.message
+            );
+            return executionId;
+          }
+
           const msg =
             stepErr instanceof Error ? stepErr.message : "Step failed";
           await automationExecutionRepository.updateStep(step.id, {
@@ -98,6 +173,10 @@ export class AutomationExecutor {
 
       return executionId;
     } catch (err) {
+      if (err instanceof ApprovalRequiredError) {
+        return executionId;
+      }
+
       const message = err instanceof Error ? err.message : "Execution failed";
       const execution = await automationExecutionRepository.findById(
         executionId

@@ -5,10 +5,8 @@ import { usePathname } from "next/navigation";
 import { cn } from "@/lib/utils";
 
 const mobileNav = [
-  { href: "/dashboard", label: "Home" },
-  { href: "/inbox", label: "Inbox" },
-  { href: "/automations", label: "Flows" },
-  { href: "/ai-extraction", label: "AI" },
+  { href: "/create", label: "Ask AI" },
+  { href: "/automations", label: "Workflows" },
   { href: "/settings", label: "Settings" },
 ] as const;
 
@@ -20,7 +18,8 @@ export function DashboardMobileNav() {
       {mobileNav.map((item) => {
         const active =
           pathname === item.href ||
-          (item.href !== "/dashboard" && pathname.startsWith(item.href));
+          (item.href === "/create" && pathname === "/dashboard") ||
+          (item.href !== "/create" && pathname.startsWith(item.href));
         return (
           <Link
             key={item.href}

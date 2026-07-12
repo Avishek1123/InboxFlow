@@ -24,6 +24,18 @@ function formatAuthError(err: unknown, method?: Method): string {
       ? String((err as { code: string }).code)
       : "";
 
+  if (code === "auth/invalid-api-key" || code === "auth/api-key-not-valid") {
+    return (
+      "Invalid Firebase API key. In Google Cloud → APIs & Services → Credentials, " +
+      "open your Browser key, ensure Identity Toolkit API is allowed, and add " +
+      "http://localhost:3000/* to HTTP referrers. Values must match Firebase Console → Project settings → Your apps."
+    );
+  }
+
+  if (code === "auth/user-token-expired" || code === "auth/invalid-user-token") {
+    return "Your sign-in session expired. Refresh the page and sign in again.";
+  }
+
   if (code === "auth/configuration-not-found") {
     const provider =
       method === "phone"
@@ -34,6 +46,26 @@ function formatAuthError(err: unknown, method?: Method): string {
     return `Firebase Authentication is not enabled for ${provider}. Open Firebase Console → Authentication → click Get started → Sign-in method → enable ${provider}.`;
   }
 
+  if (
+    code === "auth/network-request-failed" ||
+    (err instanceof Error &&
+      /ERR_CONNECTION|Failed to fetch|NetworkError|network/i.test(err.message))
+  ) {
+    return (
+      "Could not reach Google sign-in (network blocked or closed). Check your internet, " +
+      "disable VPN/ad-blocker for this site, and confirm Identity Toolkit API is enabled " +
+      "in Google Cloud for this Firebase project."
+    );
+  }
+
+  if (code === "auth/popup-blocked") {
+    return "Google sign-in popup was blocked. Allow popups for this site and try again.";
+  }
+
+  if (code === "auth/popup-closed-by-user") {
+    return "Google sign-in was cancelled. Try again and complete the popup.";
+  }
+
   return err instanceof Error ? err.message : "Authentication failed";
 }
 
@@ -42,7 +74,7 @@ type Props = {
   redirectTo?: string;
 };
 
-export function AuthForm({ mode, redirectTo = "/dashboard" }: Props) {
+export function AuthForm({ mode, redirectTo = "/create" }: Props) {
   const router = useRouter();
   const { refreshSession } = useAuth();
   const [method, setMethod] = useState<Method>("email");

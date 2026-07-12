@@ -4,6 +4,8 @@ import type { DecodedIdToken } from "firebase-admin/auth";
 import { getAdminAuth, isFirebaseAdminConfigured } from "@/lib/firebase/admin";
 import { SESSION_COOKIE_NAME } from "@/lib/firebase/constants";
 
+const CLEAR_SESSION_PATH = "/api/auth/clear-session";
+
 export async function getServerSession(): Promise<DecodedIdToken | null> {
   if (!isFirebaseAdminConfigured()) return null;
 
@@ -20,6 +22,12 @@ export async function getServerSession(): Promise<DecodedIdToken | null> {
 
 export async function requireServerSession(): Promise<DecodedIdToken> {
   const session = await getServerSession();
-  if (!session) redirect("/sign-in");
-  return session;
+  if (session) return session;
+
+  const cookieStore = await cookies();
+  if (cookieStore.get(SESSION_COOKIE_NAME)?.value) {
+    redirect(CLEAR_SESSION_PATH);
+  }
+
+  redirect("/sign-in");
 }

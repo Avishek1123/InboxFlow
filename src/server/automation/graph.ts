@@ -1,25 +1,67 @@
 import type { AutomationTriggerType } from "@prisma/client";
 import type { WorkflowGraph, WorkflowNode } from "@/types/automation";
 import { TRIGGER_DEFINITIONS } from "@/lib/automation/definitions";
+import {
+  findTriggerNodesForEvent as matchTriggersForEvent,
+  triggerNodeMatchesEvent,
+} from "@/lib/automation/trigger-matching";
 import { AutomationEngineError } from "./errors";
 
 const TRIGGER_KINDS = new Set(TRIGGER_DEFINITIONS.map((t) => t.kind));
 
+export function getTriggerNodes(graph: WorkflowGraph): WorkflowNode[] {
+  return graph.nodes.filter(
+    (n) => n.type === "trigger" || TRIGGER_KINDS.has(n.data.kind as never)
+  );
+}
+
+export function getTriggerKinds(graph: WorkflowGraph): AutomationTriggerType[] {
+  return [
+    ...new Set(
+      getTriggerNodes(graph).map((n) => n.data.kind as AutomationTriggerType)
+    ),
+  ];
+}
+
+export function findTriggerNodesByKind(
+  graph: WorkflowGraph,
+  kind: AutomationTriggerType
+): WorkflowNode[] {
+  return matchTriggersForEvent(graph, kind);
+}
+
+export { matchTriggersForEvent as findTriggerNodesForEvent };
+
+export function graphHasTriggerKind(
+  graph: unknown,
+  kind: AutomationTriggerType
+): boolean {
+  const g = graph as WorkflowGraph;
+  return findTriggerNodesByKind(g, kind).length > 0;
+}
+
 export function validateGraph(graph: WorkflowGraph): {
   valid: boolean;
   errors: string[];
+  triggerNodes: WorkflowNode[];
   triggerNode: WorkflowNode | null;
   triggerType: AutomationTriggerType | null;
 } {
   const errors: string[] = [];
 
   if (!graph.nodes?.length) {
-    return { valid: false, errors: ["Workflow must have at least one node"], triggerNode: null, triggerType: null };
+    return {
+      valid: false,
+      errors: ["Workflow must have at least one node"],
+      triggerNodes: [],
+      triggerNode: null,
+      triggerType: null,
+    };
   }
 
-  const triggers = graph.nodes.filter((n) => TRIGGER_KINDS.has(n.data.kind as never));
-  if (triggers.length !== 1) {
-    errors.push("Workflow must have exactly one trigger node");
+  const triggers = getTriggerNodes(graph);
+  if (triggers.length < 1) {
+    errors.push("Workflow must have at least one trigger node");
   }
 
   const triggerNode = triggers[0] ?? null;
@@ -39,12 +81,19 @@ export function validateGraph(graph: WorkflowGraph): {
     errors.push("Workflow must have at least one action node");
   }
 
-  if (triggerNode && actionNodes.length > 0) {
-    const reachable = getReachableNodes(graph, triggerNode.id);
-    const unreachable = actionNodes.filter((n) => !reachable.has(n.id));
+  if (triggers.length > 0 && actionNodes.length > 0) {
+    const reachableFromAnyTrigger = new Set<string>();
+    for (const trigger of triggers) {
+      for (const id of getReachableNodes(graph, trigger.id)) {
+        reachableFromAnyTrigger.add(id);
+      }
+    }
+    const unreachable = actionNodes.filter(
+      (n) => !reachableFromAnyTrigger.has(n.id)
+    );
     if (unreachable.length > 0) {
       errors.push(
-        `${unreachable.length} action node(s) are not connected to the trigger`
+        `${unreachable.length} action node(s) are not connected to any trigger`
       );
     }
   }
@@ -52,6 +101,7 @@ export function validateGraph(graph: WorkflowGraph): {
   return {
     valid: errors.length === 0,
     errors,
+    triggerNodes: triggers,
     triggerNode,
     triggerType,
   };
@@ -78,18 +128,15 @@ function getReachableNodes(graph: WorkflowGraph, startId: string): Set<string> {
   return visited;
 }
 
-/**
- * Topological order of action nodes following edges from trigger.
- */
 export function getExecutionOrder(
   graph: WorkflowGraph,
   triggerNodeId: string
 ): WorkflowNode[] {
-  const { valid, errors } = validateGraph(graph);
-  if (!valid) {
+  const triggerNode = graph.nodes.find((n) => n.id === triggerNodeId);
+  if (!triggerNode) {
     throw new AutomationEngineError(
       "INVALID_GRAPH",
-      errors.join("; ")
+      `Trigger node ${triggerNodeId} not found`
     );
   }
 
@@ -130,3 +177,5 @@ export function getExecutionOrder(
     .map((id) => nodeMap.get(id)!)
     .filter((n) => n.type === "action");
 }
+
+export { triggerNodeMatchesEvent };

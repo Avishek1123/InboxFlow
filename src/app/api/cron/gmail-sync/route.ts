@@ -18,6 +18,7 @@ export async function GET(request: Request) {
     ok: true,
     accounts: results.length,
     results,
+    hint: "Schedule this endpoint every 5–15 min (e.g. cron) for starred-mail → sheet automation.",
     timestamp: new Date().toISOString(),
   });
 }

@@ -1,21 +1,10 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #0a0a0a;
-  --muted: #f4f4f5;
-  --muted-foreground: #71717a;
-  --border: #e4e4e7;
-  --primary: #18181b;
-  --primary-foreground: #fafafa;
-  --sidebar: #fafafa;
-  --sidebar-foreground: #18181b;
-  --radius: 0.5rem;
-  --scrollbar-thumb: rgb(161 161 170 / 0.45);
-  --scrollbar-thumb-hover: rgb(113 113 122 / 0.7);
-}
+/* Class-based dark mode only (not OS media query). */
+@custom-variant dark (&:where(.dark, .dark *));
 
-@theme inline {
+/* Use @theme (not inline) so utilities reference CSS vars at runtime. */
+@theme {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-muted: var(--muted);
@@ -30,20 +19,37 @@
   --radius-lg: var(--radius);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #09090b;
-    --foreground: #fafafa;
-    --muted: #27272a;
-    --muted-foreground: #a1a1aa;
-    --border: #27272a;
-    --primary: #fafafa;
-    --primary-foreground: #18181b;
-    --sidebar: #18181b;
-    --sidebar-foreground: #fafafa;
-    --scrollbar-thumb: rgb(113 113 122 / 0.45);
-    --scrollbar-thumb-hover: rgb(161 161 170 / 0.65);
-  }
+:root,
+html {
+  --background: #ffffff;
+  --foreground: #0a0a0a;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --border: #e4e4e7;
+  --primary: #18181b;
+  --primary-foreground: #fafafa;
+  --sidebar: #18181b;
+  --sidebar-foreground: #fafafa;
+  --radius: 0.5rem;
+  --scrollbar-thumb: rgb(161 161 170 / 0.45);
+  --scrollbar-thumb-hover: rgb(113 113 122 / 0.7);
+  color-scheme: light;
+}
+
+html.dark,
+.dark {
+  --background: #09090b;
+  --foreground: #fafafa;
+  --muted: #27272a;
+  --muted-foreground: #a1a1aa;
+  --border: #27272a;
+  --primary: #fafafa;
+  --primary-foreground: #18181b;
+  --sidebar: #18181b;
+  --sidebar-foreground: #fafafa;
+  --scrollbar-thumb: rgb(113 113 122 / 0.45);
+  --scrollbar-thumb-hover: rgb(161 161 170 / 0.65);
+  color-scheme: dark;
 }
 
 body {
@@ -98,4 +104,653 @@ body {
 
 .scrollbar-none::-webkit-scrollbar {
   display: none;
+}
+
+/* ── Ask AI build modal (connecting icons) ───────────────────────────────── */
+.studio-modal {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s ease;
+}
+
+.studio-modal--in {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.studio-modal--out {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.5s ease;
+}
+
+.studio-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(6, 8, 10, 0.72);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.studio-modal__panel {
+  position: relative;
+  z-index: 1;
+  transform: translateY(18px) scale(0.96);
+  opacity: 0;
+  transition:
+    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.45s ease;
+}
+
+.studio-modal--in .studio-modal__panel {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+
+.studio-modal--out .studio-modal__panel {
+  transform: translateY(10px) scale(0.98);
+  opacity: 0;
+}
+
+.studio-modal__shine {
+  pointer-events: none;
+  position: absolute;
+  inset: -40% -20% auto;
+  height: 60%;
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    rgba(52, 211, 153, 0.18),
+    transparent 65%
+  );
+}
+
+.studio-modal__title {
+  animation: studio-headline-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.studio-modal__sub {
+  animation: studio-fade-up 0.55s ease 0.05s both;
+}
+
+.studio-modal__wire {
+  fill: none;
+  stroke: rgba(255, 255, 255, 0.12);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 6 8;
+  transition: stroke 0.5s ease, opacity 0.5s ease;
+}
+
+.studio-modal__wire--on {
+  stroke: rgba(52, 211, 153, 0.75);
+  stroke-dasharray: 4 6;
+  animation: studio-wire-dash 1.1s linear infinite;
+  filter: drop-shadow(0 0 6px rgba(52, 211, 153, 0.45));
+}
+
+.studio-modal__packet {
+  filter: drop-shadow(0 0 6px rgba(110, 231, 183, 0.9));
+}
+
+.studio-modal__node-face--pulse {
+  animation: studio-node-pulse 1.6s ease-in-out infinite;
+  box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.35);
+}
+
+.studio-modal__bar {
+  transition: width 0.85s cubic-bezier(0.22, 1, 0.36, 1);
+  box-shadow: 0 0 16px rgba(52, 211, 153, 0.4);
+}
+
+@keyframes studio-wire-dash {
+  to {
+    stroke-dashoffset: -28;
+  }
+}
+
+@keyframes studio-node-pulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(52, 211, 153, 0.35);
+    transform: scale(1);
+  }
+  50% {
+    box-shadow: 0 0 0 10px rgba(52, 211, 153, 0);
+    transform: scale(1.04);
+  }
+}
+
+@keyframes studio-headline-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes studio-fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes studio-ready-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(18px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.studio-ready-reveal {
+  animation: studio-ready-reveal 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.studio-checklist-row {
+  transition:
+    border-color 0.45s ease,
+    background-color 0.45s ease,
+    opacity 0.45s ease,
+    transform 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.studio-checklist-row--active {
+  transform: translateX(4px);
+}
+
+.studio-checklist-row--done {
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio-modal__wire--on,
+  .studio-modal__node-face--pulse,
+  .studio-modal__title,
+  .studio-modal__sub,
+  .studio-ready-reveal {
+    animation: none !important;
+  }
+
+  .studio-modal,
+  .studio-modal__panel {
+    transition: none;
+  }
+}
+
+/* ── First-visit product walkthrough ─────────────────────────────────────── */
+.walkthrough {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.35s ease;
+}
+
+.walkthrough--in {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.walkthrough--out {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.4s ease;
+}
+
+.walkthrough__backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(5, 7, 9, 0.78);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.walkthrough__panel {
+  position: relative;
+  z-index: 1;
+  transform: translateY(22px) scale(0.96);
+  opacity: 0;
+  transition:
+    transform 0.55s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.4s ease;
+}
+
+.walkthrough--in .walkthrough__panel {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+}
+
+.walkthrough--out .walkthrough__panel {
+  transform: translateY(12px) scale(0.98);
+  opacity: 0;
+}
+
+.walkthrough__glow {
+  pointer-events: none;
+  position: absolute;
+  inset: -35% -15% auto;
+  height: 55%;
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    rgba(52, 211, 153, 0.16),
+    transparent 65%
+  );
+}
+
+.walkthrough__title {
+  animation: studio-headline-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.walkthrough__body {
+  animation: studio-fade-up 0.5s ease 0.05s both;
+}
+
+.walkthrough__stage {
+  animation: studio-fade-up 0.55s ease both;
+}
+
+.walkthrough__brand-mark {
+  font-size: 1.75rem;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  color: #fff;
+  animation: studio-headline-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.walkthrough__prompt-card {
+  animation: studio-fade-up 0.55s ease both;
+}
+
+.walkthrough__line {
+  animation: walkthrough-shimmer 1.8s ease-in-out infinite;
+}
+
+.walkthrough__line--2 {
+  animation-delay: 0.15s;
+}
+
+.walkthrough__line--3 {
+  animation-delay: 0.3s;
+}
+
+.walkthrough__cta-bar {
+  animation: walkthrough-cta-glow 1.8s ease-in-out infinite;
+}
+
+.walkthrough__wire {
+  fill: none;
+  stroke: rgba(52, 211, 153, 0.7);
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-dasharray: 5 7;
+  animation: studio-wire-dash 1s linear infinite;
+  filter: drop-shadow(0 0 5px rgba(52, 211, 153, 0.4));
+}
+
+.walkthrough__wire--late {
+  animation-delay: 0.25s;
+}
+
+.walkthrough__orb-pulse {
+  animation: studio-node-pulse 1.8s ease-in-out infinite;
+}
+
+.walkthrough__cell {
+  animation: studio-fade-up 0.45s ease both;
+}
+
+.walkthrough__link-pill {
+  animation: studio-fade-up 0.55s ease 0.25s both;
+}
+
+.walkthrough__mini {
+  animation: studio-fade-up 0.5s ease both;
+}
+
+.walkthrough__mini:nth-child(2) {
+  animation-delay: 0.08s;
+}
+
+.walkthrough__mini:nth-child(3) {
+  animation-delay: 0.16s;
+}
+
+.walkthrough__ready-ring {
+  animation: studio-node-pulse 1.6s ease-in-out infinite;
+}
+
+@keyframes walkthrough-shimmer {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 0.75;
+  }
+}
+
+@keyframes walkthrough-cta-glow {
+  0%,
+  100% {
+    opacity: 0.75;
+    box-shadow: 0 0 0 rgba(16, 185, 129, 0);
+  }
+  50% {
+    opacity: 1;
+    box-shadow: 0 0 18px rgba(16, 185, 129, 0.35);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .walkthrough__title,
+  .walkthrough__body,
+  .walkthrough__stage,
+  .walkthrough__brand-mark,
+  .walkthrough__line,
+  .walkthrough__cta-bar,
+  .walkthrough__wire,
+  .walkthrough__orb-pulse,
+  .walkthrough__ready-ring,
+  .walkthrough__mini {
+    animation: none !important;
+  }
+
+  .walkthrough,
+  .walkthrough__panel {
+    transition: none;
+  }
+}
+
+/* ── Marketing cinematic one-pager ───────────────────────────────────────── */
+.marketing-hero__sky {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(
+      ellipse 90% 70% at 70% 40%,
+      rgba(16, 185, 129, 0.16),
+      transparent 55%
+    ),
+    radial-gradient(ellipse 60% 50% at 15% 80%, rgba(20, 184, 166, 0.08), transparent),
+    linear-gradient(165deg, #05070a 0%, #0a1014 45%, #05070a 100%);
+}
+
+.marketing-hero__grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+  background-size: 56px 56px;
+  mask-image: radial-gradient(ellipse 75% 60% at 60% 45%, black, transparent);
+  opacity: 0.55;
+}
+
+.marketing-hero__orb {
+  position: absolute;
+  border-radius: 50%;
+  filter: blur(60px);
+  pointer-events: none;
+}
+
+.marketing-hero__orb--a {
+  width: 42vw;
+  height: 42vw;
+  max-width: 480px;
+  max-height: 480px;
+  right: -5%;
+  top: 18%;
+  background: rgba(16, 185, 129, 0.18);
+  animation: marketing-drift 14s ease-in-out infinite alternate;
+}
+
+.marketing-hero__orb--b {
+  width: 28vw;
+  height: 28vw;
+  max-width: 320px;
+  max-height: 320px;
+  left: 5%;
+  bottom: 10%;
+  background: rgba(45, 212, 191, 0.1);
+  animation: marketing-drift 18s ease-in-out infinite alternate-reverse;
+}
+
+.marketing-hero__fade {
+  background: linear-gradient(to top, #07090c, transparent);
+}
+
+.marketing-hero__brand,
+.marketing-hero__headline,
+.marketing-hero__sub,
+.marketing-hero__cta {
+  opacity: 0;
+  transform: translateY(16px);
+}
+
+.marketing--alive .marketing-hero__brand {
+  animation: studio-fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.05s both;
+}
+
+.marketing--alive .marketing-hero__headline {
+  animation: studio-fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.15s both;
+}
+
+.marketing--alive .marketing-hero__sub {
+  animation: studio-fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.25s both;
+}
+
+.marketing--alive .marketing-hero__cta {
+  animation: studio-fade-up 0.7s cubic-bezier(0.22, 1, 0.36, 1) 0.35s both;
+}
+
+.marketing--alive .marketing-hero__stage {
+  animation: studio-fade-up 0.9s cubic-bezier(0.22, 1, 0.36, 1) 0.2s both;
+}
+
+/* Hero foundry — unique to marketing (not the product loader graph) */
+.foundry__caret {
+  display: inline-block;
+  margin-left: 1px;
+  color: rgba(110, 231, 183, 0.9);
+  animation: foundry-blink 1s steps(1) infinite;
+}
+
+.foundry__chip {
+  position: absolute;
+  top: 110%;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.04);
+  padding: 4px 10px;
+  font-size: 9px;
+  color: rgba(255, 255, 255, 0.55);
+  animation-name: foundry-rise;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+.foundry__prism {
+  position: relative;
+}
+
+.foundry__beam {
+  position: absolute;
+  inset: 8% 42%;
+  border-radius: 999px;
+  background: linear-gradient(
+    to bottom,
+    transparent,
+    rgba(52, 211, 153, 0.55),
+    transparent
+  );
+  filter: blur(1px);
+  animation: foundry-beam-pulse 2.4s ease-in-out infinite;
+}
+
+.foundry__scan {
+  position: absolute;
+  left: 15%;
+  right: 15%;
+  height: 18%;
+  border-radius: 4px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(167, 243, 208, 0.55),
+    transparent
+  );
+  box-shadow: 0 0 24px rgba(52, 211, 153, 0.35);
+  animation: foundry-scan 2.8s ease-in-out infinite;
+}
+
+.foundry__prism-core {
+  position: relative;
+  z-index: 1;
+  width: 14px;
+  height: 56px;
+  border-radius: 4px;
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.12),
+    rgba(52, 211, 153, 0.35),
+    rgba(255, 255, 255, 0.08)
+  );
+  border: 1px solid rgba(167, 243, 208, 0.35);
+  box-shadow: 0 0 28px rgba(16, 185, 129, 0.35);
+  transform: skewY(-8deg);
+}
+
+.foundry__row {
+  opacity: 0;
+  transform: translateX(10px);
+  filter: blur(3px);
+}
+
+.foundry__row--in {
+  animation: foundry-row-in 0.55s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.foundry__lattice-glow {
+  pointer-events: none;
+  position: absolute;
+  inset: auto -20% -30% -20%;
+  height: 55%;
+  background: radial-gradient(
+    ellipse at 50% 0%,
+    rgba(16, 185, 129, 0.18),
+    transparent 70%
+  );
+}
+
+.marketing-step,
+.marketing-feature {
+  transition: opacity 0.3s ease;
+}
+
+@keyframes marketing-drift {
+  from {
+    transform: translate(0, 0);
+  }
+  to {
+    transform: translate(-4%, 6%);
+  }
+}
+
+@keyframes foundry-blink {
+  0%,
+  45% {
+    opacity: 1;
+  }
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes foundry-rise {
+  0% {
+    transform: translateY(0) rotate(-2deg);
+  }
+  100% {
+    transform: translateY(-220%) rotate(2deg);
+  }
+}
+
+@keyframes foundry-scan {
+  0%,
+  100% {
+    top: 12%;
+  }
+  50% {
+    top: 70%;
+  }
+}
+
+@keyframes foundry-beam-pulse {
+  0%,
+  100% {
+    opacity: 0.45;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+@keyframes foundry-row-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .marketing-hero__orb--a,
+  .marketing-hero__orb--b,
+  .marketing--alive .marketing-hero__brand,
+  .marketing--alive .marketing-hero__headline,
+  .marketing--alive .marketing-hero__sub,
+  .marketing--alive .marketing-hero__cta,
+  .marketing--alive .marketing-hero__stage,
+  .foundry__caret,
+  .foundry__chip,
+  .foundry__scan,
+  .foundry__beam,
+  .foundry__row--in {
+    animation: none !important;
+  }
+
+  .marketing-hero__brand,
+  .marketing-hero__headline,
+  .marketing-hero__sub,
+  .marketing-hero__cta {
+    opacity: 1;
+    transform: none;
+  }
+
+  .foundry__row {
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
 }

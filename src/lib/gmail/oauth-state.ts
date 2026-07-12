@@ -11,12 +11,24 @@ function signingKey(): string {
 
 export function createOAuthState(
   organizationId: string,
-  userId: string
+  userId: string,
+  options?: {
+    popup?: boolean;
+    sheetExportId?: string;
+    openerOrigin?: string;
+  }
 ): string {
   const payload: GmailOAuthState = {
     organizationId,
     userId,
     nonce: randomBytes(16).toString("hex"),
+    ...(options?.popup ? { popup: true } : {}),
+    ...(options?.sheetExportId
+      ? { sheetExportId: options.sheetExportId }
+      : {}),
+    ...(options?.openerOrigin
+      ? { openerOrigin: options.openerOrigin }
+      : {}),
   };
   const data = Buffer.from(JSON.stringify(payload)).toString("base64url");
   const sig = createHmac("sha256", signingKey())

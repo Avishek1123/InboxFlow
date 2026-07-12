@@ -3,6 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { GmailTriggerFilters } from "@/features/gmail/components/gmail-trigger-filters";
+import { GmailIcon } from "@/components/icons/gmail-icon";
+import {
+  inboxflowApiEnableUrl,
+  INBOXFLOW_GCP_PROJECT_NUMBER,
+} from "@/lib/gmail/inboxflow-gcp";
 import { gmailClient } from "@/services/gmail-client";
 import type { GmailAccountSummary } from "@/types/gmail";
 import { cn } from "@/lib/utils";
@@ -19,6 +24,10 @@ export function GmailIntegrationPanel() {
   const [syncing, setSyncing] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [legacyOAuth, setLegacyOAuth] = useState<{
+    mismatch: boolean;
+    project: string | null;
+  }>({ mismatch: false, project: null });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -26,6 +35,10 @@ export function GmailIntegrationPanel() {
       const res = await gmailClient.getStatus();
       setAccount(res.account);
       setConfigured(res.configured);
+      setLegacyOAuth({
+        mismatch: Boolean(res.oauthProjectMismatch),
+        project: res.legacyOAuthProject,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : "Failed to load status");
     } finally {
@@ -39,7 +52,9 @@ export function GmailIntegrationPanel() {
 
   useEffect(() => {
     if (searchParams.get("connected") === "1") {
-      setMessage("Gmail connected successfully. Run a sync to import messages.");
+      setMessage(
+        "Gmail connected. Star or receive mail matching your triggers, then Sync now (or wait for background sync). Linked sheets update after each Gmail sync and on the sheet timer."
+      );
       router.replace("/integrations/gmail");
       load();
     }
@@ -56,15 +71,38 @@ export function GmailIntegrationPanel() {
     setMessage(null);
     try {
       const res = await gmailClient.sync();
-      const { stats, newMessageIds } = res;
+      const { stats, newMessageIds, pipelineRan } = res;
+      const pipelineNote = pipelineRan
+        ? " Linked tables were extracted and Google Sheets were updated."
+        : "";
       setMessage(
-        `Sync complete: ${stats.messagesCreated} new message(s), ${stats.messagesSkipped} skipped. ${newMessageIds.length} automation trigger(s) fired.`
+        `Sync complete: ${stats.messagesCreated} new message(s), ${stats.messagesSkipped} skipped. ${newMessageIds.length} trigger(s) fired.${pipelineNote}`
       );
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Sync failed");
     } finally {
       setSyncing(false);
+    }
+  }
+
+  async function handleReconnectInboxflow() {
+    if (
+      !confirm(
+        "This will disconnect Gmail and open Google sign-in again using the InboxFlow app. Continue?"
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    setMessage(null);
+    try {
+      if (account?.status === "ACTIVE") {
+        await gmailClient.disconnect();
+      }
+      window.location.href = gmailClient.reconnectUrl;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Reconnect failed");
     }
   }
 
@@ -108,7 +146,9 @@ export function GmailIntegrationPanel() {
   }
 
   const canConnect = configured.google && configured.encryption;
-  const isConnected = account?.status === "ACTIVE";
+  const isConnected =
+    account?.status === "ACTIVE" || account?.status === "TOKEN_EXPIRED";
+  const isTokenExpired = account?.status === "TOKEN_EXPIRED";
 
   return (
     <div className="space-y-6">
@@ -140,11 +180,49 @@ export function GmailIntegrationPanel() {
         </Notice>
       )}
 
+      {(legacyOAuth.mismatch || isTokenExpired) && (
+        <Notice variant="error">
+          <strong>Gmail must be re-authorized for InboxFlow.</strong>{" "}
+          {isTokenExpired && !legacyOAuth.mismatch
+            ? (account?.syncError ??
+              "Your Gmail refresh token was revoked or is no longer valid.")
+            : (
+              <>
+                Your saved token is still from Google Cloud project{" "}
+                <strong>{legacyOAuth.project ?? "1012921681881"}</strong>, not InboxFlow (
+                505199243507).
+              </>
+            )}
+          <ol className="mt-3 list-decimal space-y-1 pl-5">
+            <li>
+              <a
+                href="https://myaccount.google.com/permissions"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                Remove InboxFlow
+              </a>{" "}
+              (and any older InboxFlow entry) from Google Account permissions.
+            </li>
+            <li>Click <strong>Reconnect with InboxFlow</strong> below (or Disconnect, then Connect).</li>
+            <li>On the Google screen, pick your account and approve all requested permissions.</li>
+          </ol>
+          <button
+            type="button"
+            onClick={handleReconnectInboxflow}
+            className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground"
+          >
+            Reconnect with InboxFlow
+          </button>
+        </Notice>
+      )}
+
       <div className="rounded-2xl border border-border bg-background p-6">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-center gap-4">
-            <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-100 text-lg font-bold text-red-700 dark:bg-red-950 dark:text-red-300">
-              G
+            <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-red-50 dark:bg-red-950">
+              <GmailIcon size={28} />
             </span>
             <div>
               <h2 className="font-semibold">Gmail account</h2>
@@ -198,7 +276,7 @@ export function GmailIntegrationPanel() {
               <button
                 type="button"
                 onClick={handleSync}
-                disabled={syncing}
+                disabled={syncing || isTokenExpired}
                 className="rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
               >
                 {syncing ? "Syncing…" : "Sync now"}
@@ -245,17 +323,64 @@ export function GmailIntegrationPanel() {
         />
       )}
 
+      <section className="rounded-2xl border border-border bg-muted/30 p-6">
+        <h3 className="text-sm font-semibold">Required Google Cloud APIs (InboxFlow)</h3>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Project number <code>{INBOXFLOW_GCP_PROJECT_NUMBER}</code> — enable each API,
+          wait 2–5 minutes, then <strong>Sync now</strong>.
+        </p>
+        <ul className="mt-3 space-y-2 text-sm">
+          <li>
+            <a
+              href={inboxflowApiEnableUrl("gmail.googleapis.com")}
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium underline"
+            >
+              Gmail API
+            </a>{" "}
+            — required for sync and starred mail
+          </li>
+          <li>
+            <a
+              href={inboxflowApiEnableUrl("sheets.googleapis.com")}
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium underline"
+            >
+              Google Sheets API
+            </a>
+          </li>
+          <li>
+            <a
+              href={inboxflowApiEnableUrl("script.googleapis.com")}
+              target="_blank"
+              rel="noreferrer"
+              className="font-medium underline"
+            >
+              Apps Script API
+            </a>
+          </li>
+        </ul>
+      </section>
+
       <section className="rounded-2xl border border-border p-6">
         <h3 className="text-sm font-semibold">How Gmail automations work</h3>
         <ol className="mt-3 list-decimal space-y-2 pl-5 text-sm text-muted-foreground">
           <li>Connect Gmail above (OAuth).</li>
           <li>
-            Set <strong className="text-foreground">Message triggers</strong> (starred,
-            important, inbox, etc.).
+            Set <strong className="text-foreground">Message triggers</strong> — enable{" "}
+            <strong className="text-foreground">Starred</strong> to sync when you star mail
+            in Gmail.
           </li>
           <li>
-            Click <strong className="text-foreground">Sync now</strong> — matching
-            messages are imported.
+            After you star mail in Gmail, click <strong className="text-foreground">Sync now</strong>{" "}
+            (or wait for background sync every few minutes) so InboxFlow sees the label change.
+          </li>
+          <li>
+            Linked <strong className="text-foreground">Google Sheets</strong> pull your
+            extraction table after each Gmail sync and also on the sheet&apos;s{" "}
+            <strong className="text-foreground">Enable auto-sync</strong> timer (~1 min).
           </li>
           <li>
             Matching messages fire workflows with the{" "}

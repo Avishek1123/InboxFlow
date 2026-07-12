@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { PageHeader } from "@/components/layout/page-header";
 import { automationClient } from "@/services/automation-client";
 import type { MonitoringStats } from "@/types/automation";
 
@@ -90,14 +91,38 @@ export function AutomationList({ organizationId }: Props) {
     }
   }
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (loading) {
+    return <p className="text-sm text-muted-foreground">Loading workflows…</p>;
+  }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
+      <PageHeader
+        title="Workflows"
+        description="Your automations. Prefer Ask AI to build from a prompt — or open a flow to edit and test."
+        actions={
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href="/create"
+              className="rounded-lg border border-border px-4 py-2 text-sm font-medium hover:bg-muted"
+            >
+              Ask AI
+            </Link>
+            <button
+              type="button"
+              onClick={createNew}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
+            >
+              Blank workflow
+            </button>
+          </div>
+        }
+      />
+
       {stats && (
-        <div className="grid gap-3 sm:grid-cols-4">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <StatCard label="Active" value={stats.activeAutomations} />
-          <StatCard label="Total" value={stats.totalAutomations} />
+          <StatCard label="Total workflows" value={stats.totalAutomations} />
           <StatCard label="Runs (24h)" value={stats.executions24h} />
           <StatCard
             label="Success rate"
@@ -106,58 +131,70 @@ export function AutomationList({ organizationId }: Props) {
         </div>
       )}
 
-      <div className="flex justify-between">
-        <h2 className="text-sm font-medium">Your workflows</h2>
-        <button
-          type="button"
-          onClick={createNew}
-          className="rounded-md bg-primary px-4 py-2 text-sm text-primary-foreground"
-        >
-          New automation
-        </button>
-      </div>
-
       {items.length === 0 ? (
-        <p className="text-sm text-muted-foreground">
-          No automations yet. Create your first Zapier-style workflow.
-        </p>
+        <div className="rounded-2xl border border-dashed border-border px-6 py-12 text-center">
+          <p className="text-sm font-medium">No workflows yet</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Create your first automation — connect Gmail or WhatsApp when you add
+            those steps.
+          </p>
+          <button
+            type="button"
+            onClick={createNew}
+            className="mt-4 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground"
+          >
+            Create workflow
+          </button>
+        </div>
       ) : (
-        <ul className="divide-y divide-border rounded-lg border border-border">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
           {items.map((a) => (
-            <li
+            <article
               key={a.id}
-              className="flex items-center gap-2 px-4 py-3 hover:bg-muted/50"
+              className="flex flex-col rounded-2xl border border-border bg-background p-5 shadow-sm transition-shadow hover:shadow-md"
             >
-              <Link
-                href={`/automations/${a.id}`}
-                className="min-w-0 flex-1"
-              >
-                <p className="font-medium">{a.name}</p>
-                <p className="text-xs text-muted-foreground">
-                  {a.triggerType.replace(/_/g, " ").toLowerCase()} · {a.runCount}{" "}
-                  runs
-                </p>
-              </Link>
-              <span
-                className={`shrink-0 rounded-full px-2 py-0.5 text-xs ${
-                  a.status === "ACTIVE"
-                    ? "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-200"
-                    : "bg-muted text-muted-foreground"
-                }`}
-              >
-                {a.status}
-              </span>
-              <button
-                type="button"
-                onClick={() => handleDelete(a.id, a.name)}
-                disabled={deletingId === a.id}
-                className="shrink-0 rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950"
-              >
-                {deletingId === a.id ? "…" : "Delete"}
-              </button>
-            </li>
+              <div className="flex items-start justify-between gap-2">
+                <Link href={`/automations/${a.id}`} className="min-w-0 flex-1">
+                  <h3 className="truncate font-semibold">{a.name}</h3>
+                  <p className="mt-1 text-xs capitalize text-muted-foreground">
+                    {a.triggerType.replace(/_/g, " ").toLowerCase()}
+                  </p>
+                </Link>
+                <span
+                  className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-medium ${
+                    a.status === "ACTIVE"
+                      ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200"
+                      : "bg-muted text-muted-foreground"
+                  }`}
+                >
+                  {a.status}
+                </span>
+              </div>
+              <p className="mt-4 text-xs text-muted-foreground">
+                {a.runCount} runs
+                {a.lastRunAt
+                  ? ` · last ${new Date(a.lastRunAt).toLocaleDateString()}`
+                  : ""}
+              </p>
+              <div className="mt-4 flex gap-2 border-t border-border pt-4">
+                <Link
+                  href={`/automations/${a.id}`}
+                  className="flex-1 rounded-lg border border-border py-2 text-center text-sm font-medium hover:bg-muted"
+                >
+                  Edit
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => handleDelete(a.id, a.name)}
+                  disabled={deletingId === a.id}
+                  className="rounded-lg border border-red-200 px-3 py-2 text-sm text-red-700 hover:bg-red-50 disabled:opacity-50 dark:border-red-900 dark:text-red-300 dark:hover:bg-red-950"
+                >
+                  {deletingId === a.id ? "…" : "Delete"}
+                </button>
+              </div>
+            </article>
           ))}
-        </ul>
+        </div>
       )}
     </div>
   );
@@ -165,9 +202,9 @@ export function AutomationList({ organizationId }: Props) {
 
 function StatCard({ label, value }: { label: string; value: string | number }) {
   return (
-    <div className="rounded-lg border border-border p-4">
-      <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-2xl font-semibold">{value}</p>
+    <div className="rounded-2xl border border-border bg-background p-4">
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      <p className="mt-2 text-2xl font-semibold tabular-nums">{value}</p>
     </div>
   );
 }

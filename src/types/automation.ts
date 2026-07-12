@@ -2,17 +2,32 @@ import type { AutomationTriggerType } from "@prisma/client";
 
 export type TriggerKind =
   | "NEW_GMAIL_EMAIL"
+  | "MESSAGE_RECEIVED"
   | "NEW_WHATSAPP_MESSAGE"
+  | "NEW_SMS"
+  | "NEW_TWILIO_WHATSAPP"
   | "SCHEDULED_TIME"
   | "AI_EXTRACTION_COMPLETED";
 
 export type ActionKind =
   | "SEND_EMAIL"
+  | "SEND_MESSAGE"
   | "SEND_WHATSAPP"
+  | "SEND_SMS"
+  | "SEND_TWILIO_WHATSAPP"
   | "CREATE_CONTACT"
   | "CALL_OPENAI"
   | "STORE_DATA"
-  | "WEBHOOK_REQUEST";
+  | "WEBHOOK_REQUEST"
+  | "QUERY_INBOX"
+  | "QUERY_TABLE"
+  | "SHEETS_UPSERT"
+  | "EXTRACT_TO_TABLE"
+  | "MEMORY_SET"
+  | "RUN_AGENT"
+  | "REQUEST_APPROVAL"
+  | "CONDITION"
+  | "WAIT";
 
 export type WorkflowNodeData = {
   kind: TriggerKind | ActionKind;
@@ -44,7 +59,8 @@ export type WorkflowGraph = {
 export type AutomationTriggerPayload = {
   messageId?: string;
   conversationId?: string;
-  channel?: "GMAIL" | "WHATSAPP";
+  channel?: "GMAIL" | "WHATSAPP" | "SMS";
+  provider?: "meta" | "twilio";
   from?: string;
   subject?: string;
   body?: string;

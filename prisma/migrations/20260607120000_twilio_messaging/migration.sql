@@ -1,0 +1,7 @@
+-- Twilio + SMS messaging channels
+
+ALTER TYPE "AccountProvider" ADD VALUE IF NOT EXISTS 'TWILIO';
+ALTER TYPE "MessageChannel" ADD VALUE IF NOT EXISTS 'SMS';
+ALTER TYPE "AutomationTriggerType" ADD VALUE IF NOT EXISTS 'NEW_SMS';
+ALTER TYPE "AutomationTriggerType" ADD VALUE IF NOT EXISTS 'NEW_TWILIO_WHATSAPP';
+ALTER TYPE "WebhookProvider" ADD VALUE IF NOT EXISTS 'TWILIO';

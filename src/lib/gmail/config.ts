@@ -1,9 +1,21 @@
+import { GOOGLE_SHEETS_SCOPES } from "@/lib/gmail/scopes";
+
 const DEFAULT_SCOPES = [
   "https://www.googleapis.com/auth/gmail.readonly",
   "https://www.googleapis.com/auth/gmail.modify",
   "https://www.googleapis.com/auth/gmail.send",
   "https://www.googleapis.com/auth/userinfo.email",
+  ...GOOGLE_SHEETS_SCOPES,
 ];
+
+/** Env scopes are merged in — Sheets scopes are always included. */
+export function getGoogleOAuthScopes(): string[] {
+  const scopesRaw = process.env.GOOGLE_GMAIL_SCOPES;
+  const fromEnv = scopesRaw
+    ? scopesRaw.replace(/^"|"$/g, "").split(/\s+/).filter(Boolean)
+    : [];
+  return [...new Set([...DEFAULT_SCOPES, ...fromEnv])];
+}
 
 export function getGoogleOAuthConfig() {
   const clientId = process.env.GOOGLE_CLIENT_ID;
@@ -18,12 +30,12 @@ export function getGoogleOAuthConfig() {
     );
   }
 
-  const scopesRaw = process.env.GOOGLE_GMAIL_SCOPES;
-  const scopes = scopesRaw
-    ? scopesRaw.replace(/^"|"$/g, "").split(/\s+/).filter(Boolean)
-    : DEFAULT_SCOPES;
-
-  return { clientId, clientSecret, redirectUri, scopes };
+  return {
+    clientId,
+    clientSecret,
+    redirectUri,
+    scopes: getGoogleOAuthScopes(),
+  };
 }
 
 export function isGoogleOAuthConfigured(): boolean {
@@ -33,8 +45,12 @@ export function isGoogleOAuthConfigured(): boolean {
 }
 
 export function getGmailSyncConfig() {
+  const batchSize = Number(process.env.GMAIL_SYNC_BATCH_SIZE ?? 50);
+  const backfillMax = Number(process.env.GMAIL_SYNC_BACKFILL_MAX ?? 500);
   return {
-    batchSize: Number(process.env.GMAIL_SYNC_BATCH_SIZE ?? 50),
+    batchSize,
+    /** Max messages fetched per sync from Gmail search (starred, inbox, etc.). */
+    backfillMax: Math.max(batchSize, backfillMax),
     lockTtlMinutes: Number(process.env.GMAIL_SYNC_LOCK_TTL_MINUTES ?? 15),
   };
 }

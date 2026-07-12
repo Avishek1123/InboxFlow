@@ -1,0 +1,1302 @@
+================================================================================
+InboxFlow AI — AI AGENT BUILDER ROADMAP
+================================================================================
+Document type : Product + engineering roadmap (no code)
+Based on      : Live codebase analysis (Next.js App Router, Prisma, Firebase Auth,
+                Gmail OAuth, Meta WhatsApp Cloud API, Twilio, Google Sheets,
+                React Flow automations, multi-provider AI)
+Date          : July 2026
+Status        : Current product = Zapier-style workflow engine + AI extraction
+                Target product  = AI Agent Builder platform
+
+
+================================================================================
+# 1. CURRENT PRODUCT OVERVIEW
+================================================================================
+
+## 1.1 Product summary
+----------------------
+InboxFlow AI is a multi-tenant SaaS workspace that unifies Gmail and WhatsApp
+(and optional Twilio SMS/WhatsApp) into one organization-scoped inbox, runs
+single-shot AI extraction into custom tables, syncs structured rows to Google
+Sheets, and executes fixed-graph automations (triggers → actions) built on a
+React Flow canvas.
+
+It is best described today as:
+
+  Unified Inbox + AI Extraction Pipeline + n8n/Zapier-style Workflow Engine
+
+It is NOT yet a full AI Agent Platform (no planner, tool loop, memory system,
+NL→workflow generation, HITL approval, or multi-agent orchestration).
+
+
+## 1.2 Completed features (as implemented)
+------------------------------------------
+Auth & tenancy
+  [x] Firebase Auth (email/password, Google popup, phone OTP)
+  [x] Session cookie exchange (Firebase ID token → server session)
+  [x] Auto-created personal Organization + OWNER membership
+  [x] Org-scoped APIs and data isolation
+
+Integrations
+  [x] Gmail OAuth connect / disconnect / reconnect
+  [x] Gmail sync with label/preset filters (Inbox, Starred, Important, etc.)
+  [x] Gmail send (automation action)
+  [x] WhatsApp Meta Cloud API connect (token + phone number ID + WABA ID)
+  [x] WhatsApp inbound webhook (verify token + signature validation)
+  [x] WhatsApp outbound job queue + processor
+  [x] Twilio connect + inbound SMS/WhatsApp webhook
+  [x] Twilio outbound SMS / WhatsApp send (automation actions)
+  [x] Google Sheets create + Apps Script timer sync + optional server push
+  [x] Dev tunnel (ngrok / localtunnel) for public HTTPS in local development
+
+Inbox & data
+  [x] Unified inbox (Gmail / WhatsApp / Twilio messages)
+  [x] Conversations + Messages + Attachments models
+  [x] Contacts CRM upsert from automations
+  [x] Custom Extraction Tables + rows (per message)
+  [x] SheetExport linked to extraction tables
+
+AI
+  [x] Multi-provider AI router (Groq → Gemini → OpenRouter fallback)
+  [x] AI Playground (summarize, extract lead/order/invoice, sentiment,
+      intent, auto-reply, full analysis)
+  [x] Custom-table column extraction (JSON keyed to user columns)
+  [x] AI result caching (in-memory + DB contentHash)
+  [x] Org rate limiting
+  [x] Token usage fields stored on AiExtraction (inputTokens / outputTokens)
+  [x] Automation "Call AI" action (multi-provider; legacy name CALL_OPENAI)
+
+Automations
+  [x] React Flow visual builder (drag nodes, connect edges, configure params)
+  [x] Triggers: NEW_GMAIL_EMAIL, MESSAGE_RECEIVED (WA/SMS/Twilio WA),
+      SCHEDULED_TIME, AI_EXTRACTION_COMPLETED (+ legacy channel triggers)
+  [x] Actions: SEND_EMAIL, SEND_MESSAGE, SEND_WHATSAPP, SEND_SMS,
+      SEND_TWILIO_WHATSAPP, CREATE_CONTACT, CALL_OPENAI, STORE_DATA,
+      WEBHOOK_REQUEST
+  [x] Dispatcher (event → matching active automations)
+  [x] Executor (topo walk from trigger, step recording, retries)
+  [x] Template interpolation {{trigger.*}} / {{variables.*}} / {{lastOutput}}
+  [x] Graph validation (trigger + action + reachable edges)
+  [x] Activate / pause / manual test run
+  [x] Execution + step persistence
+  [x] Monitoring API (24h runs, success rate, failed pending retry)
+  [x] Cron: Gmail sync + scheduled automations + execution retries
+
+Product surfaces
+  [x] Dashboard overview + Data tables tab
+  [x] Integrations pages (Gmail, WhatsApp, Twilio)
+  [x] Google Sheets page
+  [x] AI Extraction playground
+  [x] Automations list + builder
+  [~] Settings (theme only)
+  [ ] Billing (placeholder)
+  [ ] Scheduler UI (placeholder)
+  [ ] Multi-org invites / switcher
+  [ ] Full compose/reply in unified inbox
+
+
+## 1.3 Current architecture & workflow
+--------------------------------------
+Stack (actual):
+  Frontend     : Next.js App Router, React, Tailwind, React Flow
+  Backend      : Next.js API routes (Node runtime)
+  Database     : PostgreSQL + Prisma
+  Auth         : Firebase Auth + Admin session cookies
+  AI           : Groq / Gemini / OpenRouter (OpenAI-compatible + Gemini native)
+  Channels     : Gmail API, Meta WhatsApp Cloud API, Twilio
+  Sheets       : Google Sheets API + Apps Script time-driven sync
+  Ops          : Cron routes (CRON_SECRET), webhook logs, Gmail sync locks
+  Dev          : ngrok/localtunnel for public URL
+
+Core runtime flow today:
+
+  Event source
+    ├─ Gmail sync (manual / cron)
+    ├─ WhatsApp webhook
+    ├─ Twilio webhook
+    ├─ AI task completed
+    └─ Cron schedule tick
+           │
+           ▼
+  Persist / update domain data
+    (Message, Conversation, AiExtraction, ExtractionTableRow, …)
+           │
+           ├──────────────────────────────┐
+           ▼                              ▼
+  Sheet sync pipeline              Automation dispatcher
+  (extract missing rows            (match ACTIVE graphs +
+   into linked tables →             trigger config filters)
+   Apps Script / server push)              │
+                                           ▼
+                                   Automation executor
+                                   (linear DAG of action nodes)
+                                           │
+                                           ▼
+                                   Handlers (send / AI / store /
+                                   contact / HTTP)
+                                           │
+                                           ▼
+                                   AutomationExecution + Steps
+
+Important architectural facts:
+  - Automations are FIXED GRAPHS. The LLM does not choose tools at runtime.
+  - AI calls are SINGLE-SHOT completions with JSON schema validation.
+  - Handlers are a hard-coded switch (not a dynamic tool registry).
+  - Execution is linear topological order (no condition branches / loops).
+  - SCHEDULED_TIME currently fires matching graphs on cron; per-automation
+    cronExpression fidelity is incomplete relative to a full scheduler product.
+
+
+================================================================================
+# 2. EXISTING AGENT CAPABILITIES
+================================================================================
+These features already qualify as building blocks of an AI agent platform,
+even though they are not yet composed into a true agent runtime.
+
+
+## 2.1 Workflow engine
+----------------------
+  - Visual graph editor (React Flow)
+  - Graph JSON stored on Automation.graph
+  - Validation: ≥1 trigger, ≥1 action, reachable edges
+  - Topological execution order from firing trigger
+  - Template context: trigger payload, variables, lastOutput
+  - Activate / pause / manual run
+
+This is equivalent to the "workflow graph" layer in n8n / Langflow.
+
+
+## 2.2 Automations (deterministic agent scripts)
+------------------------------------------------
+  - Event → match → execute pipeline
+  - Per-node step I/O recording
+  - Retries with backoff
+  - Soft-fail patterns when integrations missing (log / queue instead of crash)
+
+These are "scripted agents" — behavior is predefined by the user graph.
+
+
+## 2.3 AI extraction (perception / understanding)
+-------------------------------------------------
+  - Channel-aware prompts (Gmail vs WhatsApp)
+  - Structured extraction tasks (lead, order, invoice, sentiment, intent)
+  - Custom schema extraction into user-defined columns
+  - Auto-reply draft generation
+  - Caching by content hash (avoids repeat spend)
+
+This is the "LLM as a skill" layer — not yet an autonomous agent loop.
+
+
+## 2.4 Event-driven execution
+-----------------------------
+  - NEW_GMAIL_EMAIL after sync + filter match
+  - NEW_WHATSAPP_MESSAGE / NEW_SMS / NEW_TWILIO_WHATSAPP from webhooks
+  - AI_EXTRACTION_COMPLETED after successful AI tasks
+  - SCHEDULED_TIME via cron
+  - Manual dispatch API
+
+This is the "environment → agent wake-up" layer.
+
+
+## 2.5 Integrations (environment / actuators)
+---------------------------------------------
+  - Gmail read (sync) + send
+  - WhatsApp inbound + outbound
+  - Twilio inbound + outbound
+  - Google Sheets write path (product pipeline)
+  - Outbound HTTP webhook
+  - Contacts upsert
+  - Key/value store (AutomationDataRecord)
+
+These are the raw capabilities that become TOOLS in an agent framework.
+
+
+## 2.6 Background jobs
+----------------------
+  - Gmail sync cron + lock TTL
+  - Automation cron + failed execution retry
+  - WhatsAppOutboundJob queue processing
+  - Webhook idempotency keys / WebhookLog
+  - Sheet sync pipeline after Gmail/WhatsApp events
+  - Dev tunnel lifecycle for public callbacks
+
+These support long-running / async agent operations.
+
+
+## 2.7 Tool-like actions (today's handler set)
+----------------------------------------------
+Already callable as fixed workflow nodes:
+
+  sendEmail          → Gmail API send
+  sendWhatsApp       → Meta Cloud API (via outbound jobs)
+  sendSms            → Twilio
+  sendTwilioWhatsApp → Twilio WhatsApp
+  sendMessage        → router across Meta/Twilio options
+  callAi             → multi-provider analyze task
+  createContact      → Contact upsert
+  storeData          → AutomationDataRecord write
+  webhookRequest     → outbound HTTP
+
+Missing as first-class tools (exist partially elsewhere):
+  gmail.search / gmail.getMessage / gmail.getAttachments
+  sheets.read / sheets.insertRow / sheets.updateRow (as automation nodes)
+  inbox.search / tables.query / executions.query
+
+
+================================================================================
+# 3. GAP ANALYSIS
+================================================================================
+Comparison target: modern AI Agent Platforms
+(Langflow, n8n AI Agents, OpenAI Agents SDK, CrewAI, AutoGen, LangGraph)
+
+
+--------------------------------------------------------------------------------
+Feature: Natural language → workflow generation
+--------------------------------------------------------------------------------
+Why important     : Users should describe intent ("When a starred email arrives,
+                    extract lead fields, save to sheet, WhatsApp me") and get a
+                    draft graph instead of manually wiring nodes.
+Business value    : Massive UX leap; demo-friendly; recruiter wow-factor;
+                    reduces time-to-first-automation from minutes to seconds.
+Technical complexity: High (prompting + schema for graph JSON + validation +
+                    repair loop + UI review/edit).
+
+
+--------------------------------------------------------------------------------
+Feature: Agent planner / reasoning loop (ReAct / tool-calling loop)
+--------------------------------------------------------------------------------
+Why important     : True agents decide which tools to call, observe results,
+                    and continue until the goal is met — unlike fixed DAGs.
+Business value    : Positions product as Agent Builder, not just Zapier clone;
+                    enables ambiguous tasks ("follow up if customer is hot lead").
+Technical complexity: High (provider tool schemas, loop limits, safety, state).
+
+
+--------------------------------------------------------------------------------
+Feature: Dynamic tool registry
+--------------------------------------------------------------------------------
+Why important     : Tools should be discoverable, typed, permissioned, and
+                    callable by both fixed workflows AND agent loops.
+Business value    : Extensibility; safer integrations; cleaner architecture than
+                    a growing switch statement.
+Technical complexity: Medium (wrap existing handlers; add JSON schemas;
+                    org-level enablement).
+
+
+--------------------------------------------------------------------------------
+Feature: Conditional branching / IF / switch / wait nodes
+--------------------------------------------------------------------------------
+Why important     : Real workflows need "if lead.confidence > 0.8 then … else …"
+                    and wait-for-reply patterns.
+Business value    : Unlocks production-grade ops automations.
+Technical complexity: Medium (graph model + executor changes + UI).
+
+
+--------------------------------------------------------------------------------
+Feature: Human-in-the-loop (HITL) approval
+--------------------------------------------------------------------------------
+Why important     : Agents that send customer messages / money-impacting actions
+                    need approval gates.
+Business value    : Trust, compliance, enterprise readiness.
+Technical complexity: Medium (pause execution, notify UI, resume API).
+
+
+--------------------------------------------------------------------------------
+Feature: Agent / workspace memory (short + long term)
+--------------------------------------------------------------------------------
+Why important     : Agents need conversation context, customer history, and
+                    prior decisions — not only the current trigger payload.
+Business value    : Better replies, fewer repeated questions, personalization.
+Technical complexity: Medium–High (schema + retrieval + prompt injection policy).
+
+
+--------------------------------------------------------------------------------
+Feature: RAG over inbox / tables / sheets
+--------------------------------------------------------------------------------
+Why important     : "Chat with workspace" and grounded agent answers need
+                    retrieval over messages and extracted rows.
+Business value    : Differentiator vs generic ChatGPT wrappers.
+Technical complexity: High (embeddings, chunking, ACL by org, freshness).
+
+
+--------------------------------------------------------------------------------
+Feature: Chat with workspace (copilot)
+--------------------------------------------------------------------------------
+Why important     : Natural language interface to inbox, tables, sheets,
+                    workflows, and tools.
+Business value    : Daily engagement surface; portfolio showcase.
+Technical complexity: High (depends on tools + memory + RAG + UI streaming).
+
+
+--------------------------------------------------------------------------------
+Feature: Observability (runs, tools, tokens, cost, latency)
+--------------------------------------------------------------------------------
+Why important     : Debugging agents without traces is impossible; cost control
+                    requires token→$ mapping.
+Business value    : Operator trust; portfolio depth; production readiness.
+Technical complexity: Medium (extend existing Execution/AiExtraction models + UI).
+
+
+--------------------------------------------------------------------------------
+Feature: Multi-agent orchestration
+--------------------------------------------------------------------------------
+Why important     : Specialized agents (Email / Extract / Validate / Notify)
+                    collaborate with shared memory and handoffs.
+Business value    : Advanced architecture story; scales complex processes.
+Technical complexity: High (supervisor pattern, shared state, failure contracts).
+
+
+--------------------------------------------------------------------------------
+Feature: Cron expression fidelity + Scheduler product UI
+--------------------------------------------------------------------------------
+Why important     : SCHEDULED_TIME exists but product scheduler UX is a stub;
+                    precise schedules matter for ops.
+Business value    : Completes automation story; reduces surprise runs.
+Technical complexity: Low–Medium.
+
+
+--------------------------------------------------------------------------------
+Feature: Sheets / Gmail search as first-class automation tools
+--------------------------------------------------------------------------------
+Why important     : Agents need to READ as well as WRITE the environment.
+Business value    : Closes the loop for "check sheet then reply" workflows.
+Technical complexity: Medium (APIs mostly exist; need tool wrappers + UI nodes).
+
+
+--------------------------------------------------------------------------------
+Feature: Cost budgets & spend alerts
+--------------------------------------------------------------------------------
+Why important     : Paid Gemini/Claude usage can spike with backfill + multi-table
+                    extract.
+Business value    : Prevents bill shock; enterprise hygiene.
+Technical complexity: Low–Medium (tokens already stored; need pricing table + UI).
+
+
+================================================================================
+# 4. PENDING FEATURES (PRIORITY MATRIX)
+================================================================================
+
+## P0 – Critical Features
+(Must-have to honestly call InboxFlow an AI Agent Builder)
+
+
+P0-1  Tool Registry (wrap existing handlers)
+  Description   : Convert hard-coded executeAction switch into a typed
+                  ToolDefinition registry (name, schema, permissions,
+                  execute). Keep backward compatibility with current nodes.
+  Dependencies  : None (can start immediately)
+  Status        : Partial (handlers exist; registry does not)
+
+
+P0-2  Agent Runtime (planner + tool-calling loop)
+  Description   : New node type / mode: AGENT. LLM receives goal + available
+                  tools, calls tools iteratively with maxSteps, writes
+                  observations into run state, finishes with structured result.
+  Dependencies  : P0-1
+  Status        : Not Started
+
+
+P0-3  Natural Language → Workflow Draft
+  Description   : Chat/prompt box generates a validated Automation.graph JSON,
+                  opens in builder for review/edit before save/activate.
+  Dependencies  : Graph schema docs; validation already exists
+  Status        : Not Started
+
+
+P0-4  HITL Approval Node
+  Description   : Pause execution awaiting human approve/reject (UI + API +
+                  timeout policy). Required before customer-facing sends in
+                  agent mode.
+  Dependencies  : Executor pause/resume support
+  Status        : Not Started
+
+
+P0-5  Agent Observability Console
+  Description   : Unified view of workflow runs, agent steps, tool calls,
+                  tokens, estimated cost, errors, retries, latency. Deep-link
+                  from builder.
+  Dependencies  : Extend AiExtraction + AutomationExecutionStep metadata
+  Status        : Partial (executions + monitoring API + token fields exist;
+                  no full console)
+
+
+P0-6  Read Tools (Gmail search, inbox query, table query, sheets read)
+  Description   : Agents cannot only send — they must inspect environment.
+                  Expose search/list/get tools over existing Message /
+                  ExtractionTable / SheetExport data and Gmail API.
+  Dependencies  : P0-1
+  Status        : Partial (data + Gmail sync APIs exist; not toolized)
+
+
+--------------------------------------------------------------------------------
+## P1 – High Impact Features
+(Strong portfolio / recruiter-facing upgrades)
+
+
+P1-1  Chat With Workspace
+  Description   : Org-scoped chat that can search inbox, query tables, summarize
+                  sheet-linked data, inspect workflow history, and optionally
+                  invoke tools with confirmation.
+  Dependencies  : P0-1, P0-6; better with P1-2
+  Status        : Not Started
+
+
+P1-2  Structured Memory System (v1 without vectors)
+  Description   : Short-term run memory, conversation memory, customer memory
+                  profiles, long-term key facts — injected into agent prompts
+                  with clear policies.
+  Dependencies  : Schema additions; Contact + Message already help
+  Status        : Partial (Contacts, AutomationDataRecord, ExtractionTables,
+                  AiExtraction exist as raw stores)
+
+
+P1-3  Conditional / Switch / Wait nodes
+  Description   : Branching and wait-for-event nodes in the visual builder.
+  Dependencies  : Executor + graph model updates
+  Status        : Not Started
+
+
+P1-4  Token → Cost tracking + budgets
+  Description   : Map provider/model tokens to USD; org daily/monthly budgets;
+                  alerts when extract pipelines spike.
+  Dependencies  : AiExtraction token fields (done)
+  Status        : Partial (tokens stored; no pricing/UI)
+
+
+P1-5  Cron fidelity + Scheduler UI
+  Description   : Honor Automation.cronExpression; replace Scheduler placeholder
+                  with real schedule management and run history.
+  Dependencies  : Existing cron route
+  Status        : Partial
+
+
+P1-6  Sheets write/update as automation/agent tools
+  Description   : sheets.insertRow / updateRow / upsertByKey as first-class
+                  tools (not only product sheet-sync pipeline).
+  Dependencies  : P0-1; Google Sheets write helpers exist
+  Status        : Partial
+
+
+--------------------------------------------------------------------------------
+## P2 – Product Enhancements
+
+
+P2-1  RAG / Vector retrieval over Messages + ExtractionTableRows
+  Description   : Embeddings + similarity search for grounded chat/agents.
+  Dependencies  : P1-1 or P0-2; choose pgvector or external vector store
+  Status        : Not Started
+
+
+P2-2  Multi-agent orchestration (supervisor + specialists)
+  Description   : Email Agent → Extraction Agent → Validation Agent →
+                  Notification Agent with shared memory and handoff contracts.
+  Dependencies  : P0-2, P1-2
+  Status        : Not Started
+
+
+P2-3  Inbox compose / reply UI
+  Description   : Reply from unified inbox using Gmail/WhatsApp send tools.
+  Dependencies  : Existing send handlers
+  Status        : Not Started
+
+
+P2-4  WebhookLog + GmailSyncRun operator UIs
+  Description   : Surface existing ops tables in dashboard for debugging.
+  Dependencies  : Models already exist
+  Status        : Not Started
+
+
+P2-5  Team invites / multi-member orgs
+  Description   : Invite flow for OrganizationMember roles.
+  Dependencies  : Schema roles exist
+  Status        : Not Started
+
+
+P2-6  Evaluation harness for extraction quality
+  Description   : Golden-set tests for custom-table extract + playground tasks.
+  Dependencies  : AI layer
+  Status        : Not Started
+
+
+--------------------------------------------------------------------------------
+## P3 – Nice to Have
+
+
+P3-1  Billing / Stripe metering for AI usage
+  Status        : Not Started (page is placeholder)
+
+P3-2  Marketplace of agent templates
+  Status        : Not Started
+
+P3-3  Voice / multimodal WhatsApp (images, audio transcription)
+  Status        : Not Started (text-only inbound today)
+
+P3-4  Self-healing workflows (AI suggests graph fixes from failed runs)
+  Status        : Not Started
+
+P3-5  On-prem / BYOK enterprise packaging
+  Status        : Not Started
+
+
+================================================================================
+# 5. AI AGENT BUILDER FINAL VISION
+================================================================================
+
+Desired end-to-end product flow:
+
+
+Step 1 — User enters natural language instruction
+  Example:
+    "When a starred Gmail arrives from a new lead, extract name, phone, budget,
+     save to my Leads table and Google Sheet, draft a WhatsApp reply, and wait
+     for my approval before sending."
+
+  UI: Agent Builder chat / "Generate workflow" panel on /automations.
+
+
+Step 2 — AI generates workflow
+  System:
+    - Loads available triggers, tools, connected integrations for the org
+    - Generates Automation.graph JSON (triggers, actions, AGENT nodes, HITL)
+    - Runs validateGraph + tool availability checks
+    - If invalid, self-repairs once/twice with validator errors
+
+
+Step 3 — User reviews workflow
+  - Graph opens in React Flow builder
+  - Diff highlights AI-generated nodes
+  - User edits filters, columns, approval policy, messaging channel
+  - User clicks Save (draft) or Activate
+
+
+Step 4 — Workflow saved
+  - Persisted as Automation (status ACTIVE or PAUSED)
+  - Version snapshot optional (future)
+  - Linked tools/permissions recorded
+
+
+Step 5 — Trigger occurs
+  Examples:
+    - Gmail sync finds newly starred message matching filters
+    - WhatsApp inbound webhook
+    - Schedule tick
+    - Chat user asks agent to run a playbook
+  Dispatcher matches ACTIVE automations + trigger config.
+
+
+Step 6 — Agent executes
+  Two modes coexist:
+    A) Deterministic path: classic action DAG (today's executor)
+    B) Agent path: AGENT node runs planner loop with goal + tools + memory
+
+  Run creates AutomationExecution + nested AgentRun (new) records.
+
+
+Step 7 — Tools are called
+  Examples during one run:
+    inbox.getMessage(messageId)
+    ai.extractToTable(tableId, messageId)
+    sheets.upsertRow(exportId, values)
+    contacts.upsert(...)
+    whatsapp.draftMessage(...)   // or send after approval
+    storeData.set("leadScore", 0.91)
+
+  Each tool call logged with input/output/latency/tokens/cost.
+
+
+Step 8 — Memory is updated
+  - Short-term: run scratchpad / observations
+  - Conversation memory: thread summary for this customer
+  - Customer memory: Contact.metadata + CustomerMemory facts
+  - Long-term: durable preferences ("always approve WhatsApp sends")
+
+
+Step 9 — Human approval (if required)
+  - HITL node pauses execution (status WAITING_APPROVAL)
+  - User notified in app (and optional email)
+  - Approve → resume send tool
+  - Reject / edit → alternate path or cancel
+
+
+Step 10 — Results delivered
+  - Sheet row written
+  - Optional outbound message sent
+  - Dashboard / chat receives completion summary
+
+
+Step 11 — Execution logged
+  - Full trace: trigger → agent thoughts (optional) → tool calls → outputs
+  - Tokens + estimated USD
+  - Errors/retries visible in Observability console
+  - Feed used later for self-healing / evals
+
+
+================================================================================
+# 6. TOOL CALLING FRAMEWORK
+================================================================================
+Principle: Every integration capability becomes a named tool with JSON schema,
+org auth checks, and structured results. Existing handlers are the first tools.
+
+
+## 6.1 Gmail tools
+------------------
+gmail.searchEmails({ query, maxResults })
+  Status     : Partial — used inside sync, not exposed as tool/action
+  Missing    : Tool wrapper, pagination, builder node, agent schema
+  APIs       : Gmail users.messages.list
+
+gmail.getEmail({ messageId | externalId })
+  Status     : Partial — sync get exists
+  Missing    : Tool wrapper returning normalized Message
+  APIs       : Gmail users.messages.get + local DB fallback
+
+gmail.sendEmail({ to, subject, body, threadId? })
+  Status     : Completed as SEND_EMAIL handler
+  Missing    : Registry schema; attachment support; reply-thread helpers
+  APIs       : Gmail send (src/server/gmail/send.ts)
+
+gmail.getAttachments({ messageId })
+  Status     : Partial — MessageAttachment model + sync storage path
+  Missing    : Tool to list/download; agent-safe size limits
+  APIs       : Gmail attachments + Vercel Blob if configured
+
+gmail.applyLabel / gmail.star
+  Status     : Not Started (modify scope may already be granted)
+  Missing    : Entire feature
+  APIs       : Gmail users.messages.modify
+
+
+## 6.2 WhatsApp tools
+---------------------
+whatsapp.sendMessage({ to, body })
+  Status     : Completed (SEND_WHATSAPP / SEND_MESSAGE + outbound jobs)
+  Missing    : Template messages; media; delivery status tool
+  APIs       : Meta Cloud API
+
+whatsapp.sendTemplate({ to, templateName, language, components })
+  Status     : Partial — WhatsAppTemplate model exists; send path incomplete
+  Missing    : Full template send tool + UI
+  APIs       : Meta message templates
+
+whatsapp.getConversation({ waId })
+  Status     : Partial — Conversation/Message in DB
+  Missing    : Toolized query API for agents
+  APIs       : Local Prisma
+
+
+## 6.3 Twilio tools
+-------------------
+twilio.sendSMS({ to, body })
+  Status     : Completed (SEND_SMS handler)
+  Missing    : Registry + delivery receipt polling tool
+  APIs       : Twilio Messages API
+
+twilio.sendWhatsApp({ to, body })
+  Status     : Completed (SEND_TWILIO_WHATSAPP)
+  Missing    : Same as above
+  APIs       : Twilio WhatsApp sender
+
+
+## 6.4 Sheets tools
+-------------------
+sheets.insertRow({ exportId | spreadsheetId, values })
+  Status     : Partial — server write path for full payload sync
+  Missing    : Single-row tool; automation node; agent schema
+  APIs       : Google Sheets API (write-sheet-data helpers)
+
+sheets.updateRow({ exportId, rowKey, values })
+  Status     : Not Started as discrete tool
+  Missing    : Keyed upsert semantics for agents
+  APIs       : Sheets values.update / batchUpdate
+
+sheets.readRows({ exportId, range? })
+  Status     : Partial — app serves data TO Apps Script; reverse read weak
+  Missing    : Agent-facing read of spreadsheet or of ExtractionTable source
+  APIs       : Sheets values.get OR query ExtractionTableRow (preferred)
+
+
+## 6.5 Extraction / AI tools
+----------------------------
+ai.analyze({ task, messageId | text, channel })
+  Status     : Completed (AiService + CALL_OPENAI action)
+  Missing    : Clean tool name; streaming; cost attribution per tool call
+  APIs       : Provider router
+
+ai.extractToTable({ tableId, messageId, forceRefresh? })
+  Status     : Completed in product pipeline; not automation tool
+  Missing    : Handler/tool wrapper for agent/workflow use
+  APIs       : extractCustomTableRow + populateTableFromInbox
+
+tables.query({ tableId, filters, limit })
+  Status     : Partial — list APIs for UI
+  Missing    : Agent tool schema + safe filter DSL
+  APIs       : Prisma ExtractionTableRow
+
+tables.upsertRow({ tableId, messageId?, values })
+  Status     : Completed in repository
+  Missing    : Tool wrapper
+  APIs       : extractionTableRepository.upsertRow
+
+
+## 6.6 CRM / memory tools
+-------------------------
+contacts.upsert({ email?, phone?, name?, company?, metadata? })
+  Status     : Completed (CREATE_CONTACT)
+  Missing    : Search/get tools
+  APIs       : Prisma Contact
+
+contacts.find({ email? | phone? | query? })
+  Status     : Not Started as tool (find logic exists inside upsert)
+  Missing    : Explicit search tool
+  APIs       : Prisma
+
+memory.set / memory.get / memory.search
+  Status     : Partial — STORE_DATA / AutomationDataRecord is primitive KV
+  Missing    : Namespaced memory API (run / customer / org)
+  APIs       : New models (see §7)
+
+
+## 6.7 Inbox tools
+------------------
+inbox.searchMessages({ channel?, query?, limit? })
+  Status     : Partial — inbox list API for UI
+  Missing    : Full-text/search tool for agents
+  APIs       : Prisma Message (+ later RAG)
+
+inbox.getMessage({ id })
+  Status     : Partial — used internally
+  Missing    : Tool wrapper
+  APIs       : Prisma
+
+
+## 6.8 HTTP / workflow tools
+----------------------------
+webhook.call({ url, method, headers?, body? })
+  Status     : Completed (WEBHOOK_REQUEST)
+  Missing    : Auth presets; SSRF protections hardening checklist
+  APIs       : fetch
+
+workflow.emitEvent({ type, payload })
+  Status     : Partial — dispatch API exists
+  Missing    : Safe internal event tool for multi-agent handoff
+  APIs       : automationDispatcher
+
+approvals.request({ summary, payload })
+  Status     : Not Started
+  Missing    : HITL subsystem
+  APIs       : New Approval model + UI
+
+
+## 6.9 Recommended tool interface (conceptual)
+----------------------------------------------
+ToolDefinition {
+  name            : string          // e.g. "gmail.sendEmail"
+  description     : string
+  inputSchema     : JSON Schema
+  outputSchema    : JSON Schema
+  requiredScopes  : string[]        // integration permissions
+  sideEffect      : "read" | "write" | "send"
+  requiresApproval: boolean         // default for HITL policy
+  execute(ctx, input) → ToolResult
+}
+
+Agent loop calls only tools enabled for the org + automation.
+
+
+================================================================================
+# 7. AGENT MEMORY SYSTEM
+================================================================================
+
+## 7.1 Memory types
+-------------------
+
+1) Short-term memory (run-scoped)
+   - Current trigger payload
+   - Tool observations for this execution
+   - Scratchpad / intermediate variables
+   - Maps closely to today's ExecutionContext + AutomationExecution.context
+
+2) Conversation memory (thread-scoped)
+   - Per Conversation (Gmail thread / WhatsApp wa_id)
+   - Rolling summary + last N messages
+   - Updated after each inbound/outbound message and agent run
+
+3) Customer memory (contact-scoped)
+   - Durable facts: name, company, preferences, deal stage, open tickets
+   - Extends Contact + new CustomerMemoryFact table
+   - Used by reply agents and lead scoring
+
+4) Long-term org memory
+   - Business preferences ("always use professional tone")
+   - Playbook snippets
+   - Approved templates
+   - Stored as OrgMemoryDocument or namespaced AutomationDataRecord v2
+
+
+## 7.2 Retrieval strategy
+-------------------------
+Phase A (ship first — no vectors):
+  1. Load trigger message + conversation last N messages
+  2. Load Contact by email/phone if present
+  3. Load latest ExtractionTableRow(s) for this messageId
+  4. Load recent AutomationDataRecord keys used by this automation
+  5. Pack into prompt under strict token budget
+
+Phase B (RAG):
+  1. Embed Message chunks + ExtractionTableRow text + optional sheet snapshots
+  2. Similarity search filtered by organizationId
+  3. Re-rank by recency + channel
+  4. Cite sources in chat/agent answers
+
+
+## 7.3 Suggested schema (additive)
+----------------------------------
+AgentRun {
+  id, organizationId, automationExecutionId?
+  goal, status, model, inputTokens, outputTokens, estimatedCostUsd
+  startedAt, completedAt, errorMessage
+}
+
+AgentToolCall {
+  id, agentRunId, toolName, input Json, output Json
+  status, latencyMs, inputTokens?, outputTokens?, errorMessage
+}
+
+ConversationMemory {
+  id, organizationId, conversationId
+  summary Text, lastMessageAt, tokenEstimate
+  updatedAt
+}
+
+CustomerMemoryFact {
+  id, organizationId, contactId
+  key, value, confidence, source  // source: agent|user|extraction
+  createdAt, updatedAt
+}
+
+OrgMemoryDocument {
+  id, organizationId, title, content, kind  // preference|playbook|template
+  createdAt, updatedAt
+}
+
+MemoryEmbedding (Phase B) {
+  id, organizationId
+  sourceType  // message|extraction_row|org_doc
+  sourceId
+  chunkIndex
+  content
+  embedding   // vector / pgvector
+  createdAt
+}
+
+ApprovalRequest {
+  id, organizationId, executionId, stepId?
+  status  // PENDING|APPROVED|REJECTED|EXPIRED
+  summary, payload Json
+  decidedByUserId?, decidedAt?, expiresAt
+}
+
+
+## 7.4 Integration with workflows & agents
+------------------------------------------
+  - Before AGENT node: assemble MemoryPack (short + conversation + customer)
+  - During loop: append observations to short-term; persist AgentToolCall
+  - After success: update ConversationMemory summary; write CustomerMemoryFact
+    when extraction confidence high; STORE_DATA remains for explicit KV
+  - HITL: ApprovalRequest created; memory notes "awaiting approval"
+  - Chat With Workspace: same retrieval stack, different entrypoint
+
+
+================================================================================
+# 8. CHAT WITH WORKSPACE
+================================================================================
+
+## 8.1 Product goal
+-------------------
+A single chat surface where a user can ask:
+
+  "Show unpaid invoices mentioned this week"
+  "What did Ravi say on WhatsApp yesterday?"
+  "Summarize rows in Leads table not yet in the sheet"
+  "Why did the Lead Router automation fail last night?"
+  "Draft a reply and wait for my approval"
+
+
+## 8.2 User flow
+----------------
+  1. User opens /chat (or dashboard copilot drawer)
+  2. Types natural language question / command
+  3. System classifies intent: Q&A vs action
+  4. Retrieval pulls inbox hits, table rows, execution traces
+  5. If action required → propose tool plan → confirm (especially send_*)
+  6. Execute tools / read-only answers
+  7. Stream response with citations (message ids, table row ids, run ids)
+  8. Optional: "Save as automation" → jumps to NL→workflow generator
+
+
+## 8.3 Architecture
+-------------------
+UI (Chat)
+  → POST /api/v1/workspace-chat (SSE stream)
+      → WorkspaceAgent
+          → MemoryPack builder (org + user + recent thread)
+          → Retrievers:
+              inboxRetriever (Message)
+              tableRetriever (ExtractionTableRow)
+              sheetRetriever (via table or Sheets API)
+              workflowRetriever (AutomationExecution)
+          → ToolRegistry (read tools auto-allowed; write/send need confirm)
+          → LLM (Gemini Flash/Pro or Claude via OpenRouter)
+          → Response composer + citation formatter
+      → Persist ChatThread / ChatMessage
+      → Emit AgentRun + AgentToolCall for observability
+
+
+## 8.4 Permissions & safety
+---------------------------
+  - Strict organizationId isolation on every query
+  - Send tools default requiresConfirmation=true
+  - Rate limit chat turns per org
+  - Redact secrets (API keys, tokens) from tool outputs in UI
+  - Audit log every write/send from chat
+
+
+## 8.5 MVP scope vs later
+-------------------------
+MVP:
+  - Search inbox + query tables + explain failed executions
+  - No autonomous sends (draft only)
+Later:
+  - Confirmed sends
+  - Sheet live read
+  - Save chat plan as automation
+  - RAG embeddings
+
+
+================================================================================
+# 9. OBSERVABILITY & MONITORING
+================================================================================
+
+## 9.1 What exists today
+------------------------
+  - AutomationExecution + AutomationExecutionStep (status, I/O, latency, errors)
+  - Monitoring API: totals, 24h runs, success rate, failedPendingRetry
+  - Builder "Recent runs" (shallow)
+  - AiExtraction: provider, model, latencyMs, inputTokens, outputTokens
+  - WebhookLog, GmailSyncRun (DB only; weak UI)
+  - Dashboard overview stats
+
+
+## 9.2 Target monitoring system
+-------------------------------
+Views:
+  1. Workflow Runs — filter by automation, status, trigger type, time
+  2. Agent Runs — goals, step count, success/fail
+  3. Tool Calls — toolName heatmap, failure rate, p95 latency
+  4. Token Usage — by provider/model/day/org
+  5. Cost Tracking — estimated USD from pricing table
+  6. Errors — grouped by errorCode; retry queue
+  7. Channel Health — webhook failures, Gmail sync errors, tunnel status
+
+Drill-down:
+  Run → Steps → Tool calls → Raw I/O (redacted) → Related message/table row
+
+
+## 9.3 Suggested schema additions
+---------------------------------
+UsagePricing {
+  provider, model, inputUsdPer1M, outputUsdPer1M, effectiveFrom
+}
+
+AiUsageDaily {
+  organizationId, day, provider, model
+  inputTokens, outputTokens, estimatedCostUsd, requestCount
+}
+
+(Plus AgentRun / AgentToolCall from §7)
+
+Extend AutomationExecutionStep:
+  toolName?, tokenInput?, tokenOutput?, estimatedCostUsd?
+
+
+## 9.4 Implementation notes
+---------------------------
+  - Reuse existing token fields; aggregate asynchronously after each AI call
+  - Sheet extract path must also emit usage (today custom-table extract does
+    not persist AiExtraction tokens — gap to close)
+  - Alerting: email/webhook when daily cost > budget or success rate < threshold
+
+
+================================================================================
+# 10. MULTI-AGENT ARCHITECTURE
+================================================================================
+
+## 10.1 Specialist agents (example pipeline)
+--------------------------------------------
+
+Email Agent
+  Responsibility : Normalize inbound Gmail/WhatsApp/SMS events; classify
+                   urgency/intent; fetch thread context.
+  Tools          : inbox.getMessage, inbox.searchMessages, gmail.getEmail
+  Output         : Canonical EventBrief { messageId, channel, intent, urgency }
+
+Extraction Agent
+  Responsibility : Structured field extraction into tables / CRM facts.
+  Tools          : ai.extractToTable, ai.analyze, tables.upsertRow,
+                   contacts.upsert, memory.set
+  Output         : ExtractionResult { values, confidence, tableId }
+
+Validation Agent
+  Responsibility : Check required fields, duplicates, policy rules
+                   (e.g. phone E.164, budget present).
+  Tools          : tables.query, contacts.find, memory.get
+  Output         : ValidationReport { ok, issues[], normalizedValues }
+
+Notification Agent
+  Responsibility : Notify humans or customers; respect HITL.
+  Tools          : whatsapp.sendMessage, gmail.sendEmail, twilio.sendSMS,
+                   sheets.upsertRow, approvals.request
+  Output         : DeliveryReceipt | ApprovalPending
+
+
+## 10.2 Communication flow
+--------------------------
+Supervisor (or linear handoff graph):
+
+  Trigger
+    → Email Agent (EventBrief)
+    → Extraction Agent (ExtractionResult)
+    → Validation Agent
+         ├─ ok → Notification Agent
+         └─ fail → Notification Agent (ask human) OR stop with error
+
+Handoffs pass a shared RunState object (not free-form chat between agents
+in MVP). Each agent writes to AgentRun linked by parentSupervisorRunId.
+
+
+## 10.3 Shared memory usage
+---------------------------
+  - Short-term RunState shared across specialists
+  - CustomerMemoryFact updated by Extraction/Validation
+  - ConversationMemory updated by Email + Notification
+  - Org preferences (tone, approval policy) read by Notification
+
+
+## 10.4 Failure handling
+------------------------
+  - Per-agent timeout + max tool calls
+  - Validation failure → non-retryable unless data changes
+  - Send failure → retry with backoff (existing pattern)
+  - Supervisor marks parent execution FAILED with failedAgent name
+  - Optional compensation: write error row to sheet / notify owner
+  - Dead-letter queue for repeated Notification failures
+
+
+## 10.5 Mapping to current codebase
+-----------------------------------
+Today's linear automation graph can host this as four AGENT nodes or four
+deterministic sections. Multi-agent runtime should sit on top of ToolRegistry
++ MemoryPack — not replace the existing dispatcher for simple Zaps.
+
+
+================================================================================
+# 11. RESUME & PORTFOLIO POSITIONING
+================================================================================
+
+## 11.1 Resume bullet points
+----------------------------
+- Built InboxFlow AI, a multi-tenant Next.js platform unifying Gmail, WhatsApp
+  (Meta Cloud API), and Twilio into an org-scoped inbox with encrypted OAuth
+  tokens and webhook signature verification.
+
+- Designed a Zapier-style workflow engine (React Flow graphs, event dispatcher,
+  topological executor, retries, step-level I/O logging) with actions for email,
+  WhatsApp/SMS, HTTP webhooks, CRM contacts, and multi-provider AI calls.
+
+- Implemented an AI extraction pipeline (Groq/Gemini/OpenRouter fallback) that
+  maps unstructured email/WhatsApp messages into user-defined tables and
+  auto-syncs rows to Google Sheets via Apps Script timers and server push.
+
+- Shipped production-oriented ops primitives: cron Gmail sync with locks,
+  webhook idempotency logs, outbound WhatsApp job queues, token usage capture,
+  and org-level AI rate limiting.
+
+- Authored an AI Agent Builder roadmap to evolve fixed workflows into a tool-
+  calling agent runtime with memory, HITL approvals, workspace chat, and
+  multi-agent orchestration — grounded in the existing codebase.
+
+
+## 11.2 LinkedIn project description
+------------------------------------
+InboxFlow AI — Unified Inbox + AI Workflow Platform
+
+InboxFlow AI connects Gmail, WhatsApp, and SMS into one workspace, extracts
+structured data with LLMs, syncs results to Google Sheets, and runs visual
+automations when new messages arrive.
+
+I owned end-to-end product engineering: Firebase auth, Prisma data model,
+channel integrations, React Flow automation builder, AI provider router, and
+the mail/WhatsApp → extract → Sheets pipeline. Next milestone: upgrading the
+workflow engine into a full AI Agent Builder with tool calling, memory, and
+human-in-the-loop approvals.
+
+
+## 11.3 Architecture highlights (portfolio)
+-------------------------------------------
+- Event-driven core: sync/webhooks → domain persistence → automations + sheet
+  pipeline
+- Clear separation: Dispatcher (match) / Executor (run) / Handlers (tools)
+- Multi-provider AI with fallback, cache, and rate limits
+- Encryption at rest for integration secrets
+- Org tenancy on every query path
+- Dual sheet update strategies (Apps Script pull vs server push)
+- Extensible graph JSON ready for AGENT + HITL node types
+
+
+## 11.4 Recruiter-facing summary (short)
+---------------------------------------
+"Full-stack AI product: Gmail + WhatsApp inbox, LLM data extraction to Google
+Sheets, and a visual automation builder. Next.js, Prisma, Firebase, Meta &
+Google APIs. Evolving into an AI Agent Builder with tools, memory, and
+approvals."
+
+
+## 11.5 Senior engineer-facing summary
+--------------------------------------
+"InboxFlow is a multi-tenant TypeScript monolith (Next.js App Router) with a
+deterministic workflow runtime (validate → topo-execute → retry) and
+single-shot LLM skills for structured extraction. Integrations are real
+(Gmail send/sync, Meta WhatsApp webhooks + outbound jobs, Twilio, Sheets).
+The strategic gap vs LangGraph/n8n-agents is the missing tool registry and
+agent loop; the codebase already has the right seams (handlers, execution
+steps, token fields, contacts/data records) to grow into that without a
+rewrite."
+
+
+================================================================================
+# 12. FINAL IMPLEMENTATION ROADMAP
+================================================================================
+
+## 12.1 Feature matrix
+----------------------
+
+Feature                              | Priority | Impact | Complexity | Status
+-------------------------------------|----------|--------|------------|----------
+Tool Registry (wrap handlers)        | P0       | High   | Medium     | Partial
+Read tools (inbox/gmail/tables)      | P0       | High   | Medium     | Partial
+Agent runtime (tool-calling loop)    | P0       | Very High | High    | Not Started
+NL → workflow generation             | P0       | Very High | High    | Not Started
+HITL approval node                   | P0       | High   | Medium     | Not Started
+Observability console (+ cost)       | P0 / P1  | High   | Medium     | Partial
+Structured memory v1                 | P1       | High   | Medium     | Partial
+Chat With Workspace                  | P1       | Very High | High    | Not Started
+Conditional / wait nodes             | P1       | High   | Medium     | Not Started
+Token→USD budgets                    | P1       | Medium | Low        | Partial
+Scheduler UI + cron fidelity         | P1       | Medium | Low–Med    | Partial
+Sheets tools (insert/update/read)    | P1       | High   | Medium     | Partial
+RAG / embeddings                     | P2       | High   | High       | Not Started
+Multi-agent orchestration            | P2       | High   | High       | Not Started
+Inbox compose/reply                  | P2       | Medium | Medium     | Not Started
+Webhook/Sync operator UIs            | P2       | Medium | Low        | Not Started
+Team invites                         | P2       | Medium | Medium     | Not Started
+Extraction eval harness              | P2       | Medium | Low–Med    | Not Started
+Billing / Stripe                     | P3       | Medium | Medium     | Not Started
+Template marketplace                 | P3       | Medium | Medium     | Not Started
+Multimodal WhatsApp                  | P3       | Medium | High       | Not Started
+Self-healing workflows               | P3       | Medium | High       | Not Started
+
+
+## 12.2 Recommended implementation order (highest ROI → lowest)
+---------------------------------------------------------------
+Order is optimized for: (1) unlock "real agent" claim, (2) reuse existing code,
+(3) create demoable portfolio milestones quickly.
+
+  1. Tool Registry + wrap existing handlers
+       Why: Foundation for everything; low risk refactor; immediate clarity.
+
+  2. Observability console (runs + tool I/O + tokens)
+       Why: Tokens already stored; makes demos debuggable; high credibility.
+
+  3. Token→USD cost + simple budgets
+       Why: Low cost, huge production/portfolio signal.
+
+  4. Read tools (inbox.search, tables.query, gmail.getEmail)
+       Why: Agents need eyes before brains; data already in Postgres.
+
+  5. Sheets insert/update tools (expose existing write helpers)
+       Why: Completes mail/WA → sheet agent story already sold by product.
+
+  6. Agent runtime MVP (single AGENT node, maxSteps, tool loop)
+       Why: Core differentiator vs Zapier clone.
+
+  7. HITL approval node
+       Why: Makes agent sends safe enough to demo live.
+
+  8. NL → workflow generation
+       Why: Best top-of-funnel demo; depends on stable node/tool catalog.
+
+  9. Structured memory v1 (conversation + customer facts)
+       Why: Improves agent quality without vector infra.
+
+ 10. Chat With Workspace (read-only then confirm-to-act)
+       Why: Daily-driver UX; strongest portfolio narrative after agent loop.
+
+ 11. Conditional / wait nodes
+       Why: Production workflow completeness.
+
+ 12. Scheduler UI + cron fidelity
+       Why: Closes an existing product gap cheaply.
+
+ 13. RAG / embeddings
+       Why: Amplifies chat quality once chat exists.
+
+ 14. Multi-agent orchestration
+       Why: Advanced architecture chapter — after single-agent is solid.
+
+ 15. Inbox compose, team invites, billing, marketplace, multimodal
+       Why: Important product polish; lower leverage for "Agent Builder" thesis.
+
+
+## 12.3 Suggested milestone demos
+---------------------------------
+Milestone A:
+  "Toolized InboxFlow" — registry + observability + cost panel
+
+Milestone B:
+  "Agent node live" — starred email → agent extracts → sheet upsert →
+  WhatsApp draft with approval
+
+Milestone C:
+  "NL Builder + Workspace Chat" — generate workflow from English;
+  ask chat about inbox/tables/runs
+
+Milestone D:
+  "Multi-agent ops" — Email/Extract/Validate/Notify specialists with shared
+  memory and full traces
+
+
+## 12.4 Guiding principle
+-------------------------
+Do not rewrite the workflow engine.
+
+Evolve it:
+
+  Fixed graph automations (today)
+       +
+  Tool registry
+       +
+  Optional AGENT nodes with tool loops
+       +
+  Memory + HITL + Chat
+       =
+  AI Agent Builder (target)
+
+InboxFlow's unfair advantage is already having real channels, real extraction,
+real Sheets sync, and real execution logging — the agent layer should stand on
+those shoulders.
+
+
+================================================================================
+END OF DOCUMENT
+================================================================================

@@ -118,21 +118,30 @@ export function labelIdsFromFilterIds(ids: GmailFilterPresetId[]): string[] {
     .filter((x): x is string => Boolean(x));
 }
 
+/** Optional `GMAIL_SYNC_NEWER_THAN` (e.g. `30d`, `1y`). Omit or `none` = no age limit. */
+export function gmailSyncTimeSuffix(): string {
+  const raw = process.env.GMAIL_SYNC_NEWER_THAN?.trim();
+  if (!raw || raw.toLowerCase() === "none") return "";
+  return ` newer_than:${raw}`;
+}
+
 /** Gmail API `q` parameter for messages.list */
 export function buildSyncQuery(settings: GmailTriggerSettings): string {
   const presets = settings.filterIds
     .map((id) => presetById(id))
     .filter((p): p is GmailFilterPreset => Boolean(p));
 
+  const time = gmailSyncTimeSuffix();
+
   if (presets.length === 0) {
-    return "in:inbox newer_than:30d";
+    return `in:inbox${time || " newer_than:30d"}`;
   }
 
   const parts = presets.map((p) => p.query);
   const combined =
     settings.mode === "all" ? parts.join(" ") : `(${parts.join(" OR ")})`;
 
-  return `${combined} newer_than:30d`;
+  return `${combined}${time}`;
 }
 
 /** Effective label filter for automation dispatch */

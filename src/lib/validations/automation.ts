@@ -34,6 +34,8 @@ export const createAutomationSchema = z.object({
   triggerType: z.enum([
     "NEW_GMAIL_EMAIL",
     "NEW_WHATSAPP_MESSAGE",
+    "NEW_SMS",
+    "NEW_TWILIO_WHATSAPP",
     "SCHEDULED_TIME",
     "AI_EXTRACTION_COMPLETED",
   ]),
@@ -51,6 +53,8 @@ export const dispatchEventSchema = z.object({
   triggerType: z.enum([
     "NEW_GMAIL_EMAIL",
     "NEW_WHATSAPP_MESSAGE",
+    "NEW_SMS",
+    "NEW_TWILIO_WHATSAPP",
     "SCHEDULED_TIME",
     "AI_EXTRACTION_COMPLETED",
   ]),

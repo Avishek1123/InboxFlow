@@ -1,60 +1,30 @@
 /**
- * WhatsApp Business Cloud API domain types.
+ * WhatsApp Business Cloud API — org connection & API types.
  */
 
 export type WhatsAppConnectInput = {
-  organizationId: string;
-  phoneNumberId: string;
-  businessAccountId: string;
   accessToken: string;
-  webhookVerifyToken: string;
-  displayPhoneNumber: string;
-  metaAppId?: string;
-};
-
-export type WhatsAppWebhookVerifyQuery = {
-  "hub.mode": string;
-  "hub.verify_token": string;
-  "hub.challenge": string;
-};
-
-export type WhatsAppSendTextInput = {
-  connectedAccountId: string;
-  recipientPhone: string;
-  body: string;
-  replyToMessageId?: string;
-};
-
-export type WhatsAppSendTemplateInput = {
-  connectedAccountId: string;
-  recipientPhone: string;
-  templateName: string;
-  languageCode: string;
-  components?: unknown[];
-};
-
-export type WhatsAppSendMediaInput = {
-  connectedAccountId: string;
-  recipientPhone: string;
-  mediaType: "image" | "video" | "audio" | "document";
-  mediaIdOrLink: string;
-  caption?: string;
-  filename?: string;
+  phoneNumberId: string;
+  whatsappBusinessAccountId: string;
 };
 
 export type WhatsAppAccountSummary = {
   id: string;
-  displayPhone: string;
+  businessPhone: string;
   phoneNumberId: string;
-  businessAccountId: string | null;
+  whatsappBusinessAccountId: string | null;
   status: string;
+  syncStatus: string;
   lastSyncedAt: string | null;
+  syncError: string | null;
+  webhookUrl: string;
+  hasWebhookVerifyToken: boolean;
 };
 
-export type WhatsAppTemplateSummary = {
-  id: string;
-  name: string;
-  language: string;
-  status: string;
-  category: string | null;
+export type WhatsAppStatusResponse = {
+  configured: {
+    encryption: boolean;
+    platformWebhookSecret: boolean;
+  };
+  account: WhatsAppAccountSummary | null;
 };

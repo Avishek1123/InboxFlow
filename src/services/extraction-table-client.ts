@@ -1,6 +1,5 @@
 import type { ApiResponse } from "@/types";
 import type {
-  ExtractionColumn,
   ExtractionTableRecord,
   ExtractionTableRowRecord,
 } from "@/types/extraction-table";
@@ -45,7 +44,7 @@ export const extractionTableClient = {
     body: {
       name?: string;
       description?: string;
-      columns?: ExtractionColumn[];
+      columns?: Array<{ label: string; hint?: string; key?: string }>;
     }
   ) {
     return request<{ table: ExtractionTableRecord }>(

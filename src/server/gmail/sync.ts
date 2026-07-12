@@ -1,22 +1,28 @@
 import { randomUUID } from "crypto";
 import type { ConnectedAccount } from "@prisma/client";
 import { getGmailSyncConfig } from "@/lib/gmail/config";
+import { isGoogleNotFoundError } from "@/lib/gmail/google-api-errors";
+import { getSyncPipelineConfig } from "@/lib/gmail/sync-pipeline-config";
 import {
   buildSyncQuery,
   getTriggerSettings,
+  labelIdsFromFilterIds,
   messageMatchesTriggerFilters,
 } from "@/lib/gmail/trigger-filters";
 import { automationDispatcher } from "@/server/automation/dispatcher";
+import { runPostGmailSyncPipeline } from "@/server/sync-pipeline/post-gmail-sync";
 import { prisma } from "@/server/db";
 import { getGmailClientForAccount } from "@/server/gmail/client";
 import { parseGmailMessage } from "@/server/gmail/parse-message";
 import { gmailRepository } from "@/server/repositories/gmail.repository";
+import { sheetExportRepository } from "@/server/repositories/sheet-export.repository";
 import type { GmailSyncStats } from "@/types/gmail";
 
 export type SyncResult = {
   accountId: string;
   stats: GmailSyncStats;
   newMessageIds: string[];
+  pipelineRan: boolean;
 };
 
 export async function syncGmailAccount(
@@ -58,109 +64,29 @@ export async function syncGmailAccount(
     attachmentsFailed: 0,
   };
   const newMessageIds: string[] = [];
+  const pipelineMessageIds: string[] = [];
+  const triggerSettings = getTriggerSettings(account.metadata);
 
   try {
     const gmail = await getGmailClientForAccount(account);
-    const messageIds = await collectMessageIds(gmail, account, batchSize);
-    stats.messagesFetched = messageIds.length;
+    const { backfillMax } = getGmailSyncConfig();
+    const collected = await collectMessageIds(gmail, account, backfillMax);
+    const externalIds = collected.externalIds;
+    stats.messagesFetched = externalIds.length;
 
-    for (const externalId of messageIds) {
-      const existing = await prisma.message.findUnique({
-        where: {
-          connectedAccountId_externalId: {
-            connectedAccountId: account.id,
-            externalId,
-          },
-        },
+    for (const externalId of externalIds) {
+      const outcome = await ingestGmailMessage({
+        gmail,
+        account,
+        externalId,
+        triggerSettings,
+        stats,
       });
-
-      if (existing) {
-        stats.messagesSkipped += 1;
-        continue;
+      if (outcome.pipelineMessageId) {
+        pipelineMessageIds.push(outcome.pipelineMessageId);
       }
-
-      const res = await gmail.users.messages.get({
-        userId: "me",
-        id: externalId,
-        format: "full",
-      });
-
-      const parsed = parseGmailMessage(res.data);
-      if (!parsed) {
-        stats.messagesSkipped += 1;
-        continue;
-      }
-
-      const triggerSettings = getTriggerSettings(account.metadata);
-      if (!messageMatchesTriggerFilters(parsed.labels, triggerSettings)) {
-        stats.messagesSkipped += 1;
-        continue;
-      }
-
-      const conversation = await prisma.conversation.upsert({
-        where: {
-          connectedAccountId_externalThreadId: {
-            connectedAccountId: account.id,
-            externalThreadId: parsed.externalThreadId,
-          },
-        },
-        create: {
-          organizationId: account.organizationId,
-          connectedAccountId: account.id,
-          channel: "GMAIL",
-          externalThreadId: parsed.externalThreadId,
-          subject: parsed.subject,
-          snippet: parsed.snippet,
-          participantName: parsed.fromAddress,
-          participantEmails: [parsed.fromAddress],
-          lastMessageAt: parsed.receivedAt,
-        },
-        update: {
-          subject: parsed.subject ?? undefined,
-          snippet: parsed.snippet ?? undefined,
-          lastMessageAt: parsed.receivedAt,
-        },
-      });
-
-      const message = await prisma.message.create({
-        data: {
-          organizationId: account.organizationId,
-          conversationId: conversation.id,
-          connectedAccountId: account.id,
-          channel: "GMAIL",
-          direction: "INBOUND",
-          externalId: parsed.externalId,
-          externalThreadId: parsed.externalThreadId,
-          fromAddress: parsed.fromAddress,
-          toAddresses: parsed.toAddresses,
-          ccAddresses: parsed.ccAddresses,
-          subject: parsed.subject,
-          bodyText: parsed.bodyText,
-          bodyHtml: parsed.bodyHtml,
-          receivedAt: parsed.receivedAt,
-          labels: parsed.labels,
-          hasAttachments: parsed.hasAttachments,
-        },
-      });
-
-      stats.messagesCreated += 1;
-      newMessageIds.push(message.id);
-
-      if (messageMatchesTriggerFilters(parsed.labels, triggerSettings)) {
-        await automationDispatcher.dispatch({
-          organizationId: account.organizationId,
-          triggerType: "NEW_GMAIL_EMAIL",
-          payload: {
-            messageId: message.id,
-            conversationId: conversation.id,
-            channel: "GMAIL",
-            from: parsed.fromAddress,
-            subject: parsed.subject ?? undefined,
-            body: parsed.bodyText ?? parsed.snippet ?? undefined,
-            receivedAt: parsed.receivedAt.toISOString(),
-            labels: parsed.labels,
-          },
-        });
+      if (outcome.created) {
+        newMessageIds.push(outcome.pipelineMessageId!);
       }
     }
 
@@ -185,7 +111,27 @@ export async function syncGmailAccount(
       },
     });
 
-    return { accountId: account.id, stats, newMessageIds };
+    const pipelineConfig = getSyncPipelineConfig();
+    let pipelineRan = false;
+    const linkedSheets =
+      (await sheetExportRepository.list(account.organizationId)).length > 0;
+    if (
+      pipelineConfig.enabled &&
+      linkedSheets &&
+      (pipelineMessageIds.length > 0 || stats.messagesFetched > 0)
+    ) {
+      try {
+        await runPostGmailSyncPipeline(account.organizationId, {
+          extractLimit: pipelineConfig.extractLimit,
+          messageIds: pipelineMessageIds,
+        });
+        pipelineRan = true;
+      } catch (pipeErr) {
+        console.error("[gmail/sync] post-sync pipeline", pipeErr);
+      }
+    }
+
+    return { accountId: account.id, stats, newMessageIds, pipelineRan };
   } catch (err) {
     const message = err instanceof Error ? err.message : "Sync failed";
     await gmailRepository.updateSyncState(account.id, {
@@ -206,51 +152,254 @@ export async function syncGmailAccount(
   }
 }
 
+function parseStoredLabels(labels: unknown): string[] {
+  if (Array.isArray(labels)) {
+    return labels.filter((l): l is string => typeof l === "string");
+  }
+  return [];
+}
+
+function newlyMatchesTriggerFilters(
+  previousLabels: unknown,
+  nextLabels: string[],
+  settings: ReturnType<typeof getTriggerSettings>
+): boolean {
+  const was = messageMatchesTriggerFilters(parseStoredLabels(previousLabels), settings);
+  const now = messageMatchesTriggerFilters(nextLabels, settings);
+  return now && !was;
+}
+
+async function ingestGmailMessage(params: {
+  gmail: Awaited<ReturnType<typeof getGmailClientForAccount>>;
+  account: ConnectedAccount;
+  externalId: string;
+  triggerSettings: ReturnType<typeof getTriggerSettings>;
+  stats: GmailSyncStats;
+}): Promise<{ created: boolean; pipelineMessageId?: string }> {
+  const { gmail, account, externalId, triggerSettings, stats } = params;
+
+  const existing = await prisma.message.findUnique({
+    where: {
+      connectedAccountId_externalId: {
+        connectedAccountId: account.id,
+        externalId,
+      },
+    },
+  });
+
+  let res;
+  try {
+    res = await gmail.users.messages.get({
+      userId: "me",
+      id: externalId,
+      format: "full",
+    });
+  } catch (err) {
+    if (isGoogleNotFoundError(err)) {
+      stats.messagesSkipped += 1;
+      if (existing) {
+        await prisma.message.delete({ where: { id: existing.id } }).catch(() => {});
+      }
+      return { created: false };
+    }
+    throw err;
+  }
+
+  const parsed = parseGmailMessage(res.data);
+  if (!parsed) {
+    stats.messagesSkipped += 1;
+    return { created: false };
+  }
+
+  if (existing) {
+    const labelsChanged =
+      JSON.stringify(parseStoredLabels(existing.labels)) !==
+      JSON.stringify(parsed.labels);
+
+    if (labelsChanged) {
+      await prisma.message.update({
+        where: { id: existing.id },
+        data: { labels: parsed.labels },
+      });
+    }
+
+    const nowMatches = messageMatchesTriggerFilters(
+      parsed.labels,
+      triggerSettings
+    );
+    if (nowMatches) {
+      const triggerFired =
+        labelsChanged ||
+        newlyMatchesTriggerFilters(
+          existing.labels,
+          parsed.labels,
+          triggerSettings
+        );
+      const needsExtraction = await messageNeedsLinkedTableExtraction(
+        account.organizationId,
+        existing.id
+      );
+      if (triggerFired || needsExtraction) {
+        return { created: false, pipelineMessageId: existing.id };
+      }
+    }
+
+    stats.messagesSkipped += 1;
+    return { created: false };
+  }
+
+  if (!messageMatchesTriggerFilters(parsed.labels, triggerSettings)) {
+    stats.messagesSkipped += 1;
+    return { created: false };
+  }
+
+  const conversation = await prisma.conversation.upsert({
+    where: {
+      connectedAccountId_externalThreadId: {
+        connectedAccountId: account.id,
+        externalThreadId: parsed.externalThreadId,
+      },
+    },
+    create: {
+      organizationId: account.organizationId,
+      connectedAccountId: account.id,
+      channel: "GMAIL",
+      externalThreadId: parsed.externalThreadId,
+      subject: parsed.subject,
+      snippet: parsed.snippet,
+      participantName: parsed.fromAddress,
+      participantEmails: [parsed.fromAddress],
+      lastMessageAt: parsed.receivedAt,
+    },
+    update: {
+      subject: parsed.subject ?? undefined,
+      snippet: parsed.snippet ?? undefined,
+      lastMessageAt: parsed.receivedAt,
+    },
+  });
+
+  const message = await prisma.message.create({
+    data: {
+      organizationId: account.organizationId,
+      conversationId: conversation.id,
+      connectedAccountId: account.id,
+      channel: "GMAIL",
+      direction: "INBOUND",
+      externalId: parsed.externalId,
+      externalThreadId: parsed.externalThreadId,
+      fromAddress: parsed.fromAddress,
+      toAddresses: parsed.toAddresses,
+      ccAddresses: parsed.ccAddresses,
+      subject: parsed.subject,
+      bodyText: parsed.bodyText,
+      bodyHtml: parsed.bodyHtml,
+      receivedAt: parsed.receivedAt,
+      labels: parsed.labels,
+      hasAttachments: parsed.hasAttachments,
+    },
+  });
+
+  stats.messagesCreated += 1;
+
+  await automationDispatcher.dispatch({
+    organizationId: account.organizationId,
+    triggerType: "NEW_GMAIL_EMAIL",
+    payload: {
+      messageId: message.id,
+      conversationId: conversation.id,
+      channel: "GMAIL",
+      from: parsed.fromAddress,
+      subject: parsed.subject ?? undefined,
+      body: parsed.bodyText ?? parsed.snippet ?? undefined,
+      receivedAt: parsed.receivedAt.toISOString(),
+      labels: parsed.labels,
+    },
+  });
+
+  return { created: true, pipelineMessageId: message.id };
+}
+
+async function messageNeedsLinkedTableExtraction(
+  organizationId: string,
+  messageId: string
+): Promise<boolean> {
+  const exports = await prisma.sheetExport.findMany({
+    where: { organizationId },
+    select: { extractionTableId: true },
+    distinct: ["extractionTableId"],
+  });
+  if (exports.length === 0) return false;
+
+  const tableIds = exports.map((e) => e.extractionTableId);
+  const rowCount = await prisma.extractionTableRow.count({
+    where: { messageId, tableId: { in: tableIds }, organizationId },
+  });
+  return rowCount < tableIds.length;
+}
+
 async function collectMessageIds(
   gmail: Awaited<ReturnType<typeof getGmailClientForAccount>>,
   account: ConnectedAccount,
-  batchSize: number
-): Promise<string[]> {
-  const ids = new Set<string>();
+  maxIds: number
+): Promise<{ externalIds: string[] }> {
+  const settings = getTriggerSettings(account.metadata);
+  const watchedLabels = labelIdsFromFilterIds(settings.filterIds);
+  const q = buildSyncQuery(settings);
+  const allIds = new Set<string>();
+
+  let pageToken: string | undefined;
+  while (allIds.size < maxIds) {
+    const list = await gmail.users.messages.list({
+      userId: "me",
+      maxResults: Math.min(100, maxIds - allIds.size),
+      q,
+      pageToken,
+    });
+    for (const m of list.data.messages ?? []) {
+      if (m.id) allIds.add(m.id);
+    }
+    pageToken = list.data.nextPageToken ?? undefined;
+    if (!pageToken) break;
+  }
 
   if (account.gmailHistoryId) {
     try {
-      let pageToken: string | undefined;
+      let historyToken: string | undefined;
       do {
         const history = await gmail.users.history.list({
           userId: "me",
           startHistoryId: account.gmailHistoryId,
-          historyTypes: ["messageAdded"],
-          pageToken,
+          historyTypes: ["messageAdded", "labelAdded"],
+          pageToken: historyToken,
         });
 
         for (const h of history.data.history ?? []) {
           for (const added of h.messagesAdded ?? []) {
-            if (added.message?.id) ids.add(added.message.id);
+            if (added.message?.id) allIds.add(added.message.id);
+          }
+          for (const labeled of h.labelsAdded ?? []) {
+            const msgId = labeled.message?.id;
+            if (!msgId) continue;
+            const addedLabelIds = labeled.labelIds ?? [];
+            if (
+              watchedLabels.length === 0 ||
+              addedLabelIds.some((id) => watchedLabels.includes(id))
+            ) {
+              allIds.add(msgId);
+            }
           }
         }
-        pageToken = history.data.nextPageToken ?? undefined;
-      } while (pageToken && ids.size < batchSize);
+        historyToken = history.data.nextPageToken ?? undefined;
+      } while (historyToken && allIds.size < maxIds);
     } catch (err) {
-      const code = (err as { code?: number }).code;
-      if (code !== 404) throw err;
+      if (!isGoogleNotFoundError(err)) throw err;
+      // Stale historyId — fall back to search list only; cursor reset after successful sync.
+      await gmailRepository.updateSyncState(account.id, { gmailHistoryId: null });
+      account.gmailHistoryId = null;
     }
   }
 
-  if (ids.size === 0) {
-    const settings = getTriggerSettings(account.metadata);
-    const q = buildSyncQuery(settings);
-    const list = await gmail.users.messages.list({
-      userId: "me",
-      maxResults: batchSize,
-      q,
-    });
-    for (const m of list.data.messages ?? []) {
-      if (m.id) ids.add(m.id);
-    }
-  }
-
-  return [...ids].slice(0, batchSize);
+  return { externalIds: [...allIds].slice(0, maxIds) };
 }
 
 export async function syncAllActiveGmailAccounts() {

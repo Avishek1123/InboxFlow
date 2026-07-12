@@ -2,6 +2,10 @@ import type { ConnectedAccount, Prisma } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { decryptSecret, encryptSecret } from "@/lib/crypto/tokens";
 import {
+  currentOAuthProjectNumber,
+  mergeOAuthMetadata,
+} from "@/lib/gmail/oauth-metadata";
+import {
   getTriggerSettings,
   type GmailTriggerSettings,
 } from "@/lib/gmail/trigger-filters";
@@ -9,6 +13,10 @@ import type { GmailAccountSummary } from "@/types/gmail";
 
 export const gmailRepository = {
   async findGmailAccount(organizationId: string) {
+    const active = await prisma.connectedAccount.findFirst({
+      where: { organizationId, provider: "GMAIL", status: "ACTIVE" },
+    });
+    if (active) return active;
     return prisma.connectedAccount.findFirst({
       where: { organizationId, provider: "GMAIL" },
       orderBy: { updatedAt: "desc" },
@@ -69,6 +77,19 @@ export const gmailRepository = {
     expiresAt: Date | null;
     scopes: string[];
   }) {
+    const oauthProjectNumber = currentOAuthProjectNumber();
+    const existing = await prisma.connectedAccount.findUnique({
+      where: {
+        organizationId_provider_accountEmail: {
+          organizationId: params.organizationId,
+          provider: "GMAIL",
+          accountEmail: params.accountEmail,
+        },
+      },
+      select: { metadata: true },
+    });
+    const metadata = mergeOAuthMetadata(existing?.metadata, oauthProjectNumber);
+
     const data: Prisma.ConnectedAccountCreateInput = {
       organization: { connect: { id: params.organizationId } },
       user: { connect: { id: params.userId } },
@@ -84,6 +105,7 @@ export const gmailRepository = {
       scopes: params.scopes,
       syncStatus: "IDLE",
       syncError: null,
+      metadata: metadata as Prisma.InputJsonValue,
     };
 
     return prisma.connectedAccount.upsert({
@@ -102,6 +124,8 @@ export const gmailRepository = {
         tokenExpiresAt: params.expiresAt,
         scopes: params.scopes,
         syncError: null,
+        syncStatus: "IDLE",
+        metadata: metadata as Prisma.InputJsonValue,
         user: { connect: { id: params.userId } },
       },
     });
@@ -146,13 +170,64 @@ export const gmailRepository = {
   },
 
   async disconnect(accountId: string) {
+    const account = await prisma.connectedAccount.findUnique({
+      where: { id: accountId },
+    });
+
+    if (account?.encryptedAccessToken || account?.encryptedRefreshToken) {
+      try {
+        const { getGoogleAuthClientForAccount } = await import(
+          "@/server/google/auth-client"
+        );
+        const auth = await getGoogleAuthClientForAccount(account);
+        await auth.revokeCredentials();
+      } catch {
+        /* token may already be invalid */
+      }
+    }
+
+    const priorMeta =
+      typeof account?.metadata === "object" &&
+      account.metadata !== null &&
+      !Array.isArray(account.metadata)
+        ? { ...(account.metadata as Record<string, unknown>) }
+        : {};
+    delete priorMeta.oauthProjectNumber;
+
     return prisma.connectedAccount.update({
       where: { id: accountId },
       data: {
         status: "DISCONNECTED",
         encryptedAccessToken: null,
         encryptedRefreshToken: null,
+        tokenExpiresAt: null,
+        scopes: [],
         syncStatus: "IDLE",
+        syncError: null,
+        metadata: priorMeta as Prisma.InputJsonValue,
+      },
+    });
+  },
+
+  async markReconnectRequired(accountId: string, message: string) {
+    const account = await prisma.connectedAccount.findUnique({
+      where: { id: accountId },
+      select: { metadata: true },
+    });
+    const meta =
+      typeof account?.metadata === "object" &&
+      account.metadata !== null &&
+      !Array.isArray(account.metadata)
+        ? { ...(account.metadata as Record<string, unknown>) }
+        : {};
+    meta.reconnectRequired = true;
+
+    return prisma.connectedAccount.update({
+      where: { id: accountId },
+      data: {
+        status: "TOKEN_EXPIRED",
+        syncError: message,
+        metadata: meta as Prisma.InputJsonValue,
       },
     });
   },

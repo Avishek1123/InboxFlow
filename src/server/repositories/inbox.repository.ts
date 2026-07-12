@@ -29,7 +29,7 @@ export function formatFilterSummary(settings: GmailTriggerSettings): string {
 export const inboxRepository = {
   async listMessages(
     organizationId: string,
-    options?: { limit?: number; channel?: "GMAIL" | "WHATSAPP" }
+    options?: { limit?: number; channel?: "GMAIL" | "WHATSAPP" | "SMS" }
   ): Promise<InboxListResponse> {
     const limit = options?.limit ?? 100;
     const channel = options?.channel;

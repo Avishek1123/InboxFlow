@@ -31,6 +31,10 @@ export async function handleSendWhatsapp(
         payload: { type: "text", text: { body } },
       },
     });
+    const { processWhatsAppOutboundJobs } = await import(
+      "@/server/whatsapp/outbound"
+    );
+    processWhatsAppOutboundJobs(params.organizationId, 5).catch(console.error);
   }
 
   const output = {

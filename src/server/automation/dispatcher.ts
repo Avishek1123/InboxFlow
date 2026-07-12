@@ -5,40 +5,51 @@ import {
   messageMatchesTriggerFilters,
   type GmailFilterPresetId,
 } from "@/lib/gmail/trigger-filters";
-import type { AutomationTriggerPayload, DispatchEvent } from "@/types/automation";
-import { automationRepository } from "../repositories/automation.repository";
-import { gmailRepository } from "../repositories/gmail.repository";
+import type {
+  AutomationTriggerPayload,
+  DispatchEvent,
+  WorkflowGraph,
+} from "@/types/automation";
+import { findTriggerNodesByKind } from "@/server/automation/graph";
+import { automationRepository } from "@/server/repositories/automation.repository";
+import { gmailRepository } from "@/server/repositories/gmail.repository";
 import { automationExecutor } from "./executor";
 
 export class AutomationDispatcher {
   async dispatch(event: DispatchEvent): Promise<string[]> {
-    const automations = await automationRepository.findActiveByTrigger(
-      event.organizationId,
-      event.triggerType
+    const automations = await automationRepository.findActiveForOrganization(
+      event.organizationId
     );
 
     const executionIds: string[] = [];
 
     for (const automation of automations) {
-      const matches = await this.matchesTriggerConfig(
-        event.organizationId,
-        automation.triggerType,
-        event.payload,
-        automation.graph
-      );
-      if (!matches) continue;
+      const graph = automation.graph as unknown as WorkflowGraph;
+      const triggerNodes = findTriggerNodesByKind(graph, event.triggerType);
 
-      try {
-        const id = await automationExecutor.run({
-          automation,
-          triggerPayload: event.payload,
-        });
-        executionIds.push(id);
-      } catch (err) {
-        console.error(
-          `[Automation] Failed ${automation.id}:`,
-          err instanceof Error ? err.message : err
+      for (const triggerNode of triggerNodes) {
+        const matches = await this.matchesTriggerConfig(
+          event.organizationId,
+          event.triggerType,
+          event.payload,
+          triggerNode
         );
+        if (!matches) continue;
+
+        try {
+          const id = await automationExecutor.run({
+            automation,
+            triggerPayload: event.payload,
+            triggerNodeId: triggerNode.id,
+            triggerType: event.triggerType,
+          });
+          executionIds.push(id);
+        } catch (err) {
+          console.error(
+            `[Automation] Failed ${automation.id} (trigger ${triggerNode.id}):`,
+            err instanceof Error ? err.message : err
+          );
+        }
       }
     }
 
@@ -49,10 +60,8 @@ export class AutomationDispatcher {
     organizationId: string,
     triggerType: AutomationTriggerType,
     payload: AutomationTriggerPayload,
-    graph: unknown
+    trigger: { data?: { kind?: string; config?: Record<string, unknown> } }
   ): Promise<boolean> {
-    const g = graph as { nodes?: Array<{ data?: { kind?: string; config?: Record<string, unknown> } }> };
-    const trigger = g.nodes?.find((n) => n.data?.kind === triggerType);
     if (!trigger?.data?.config) return true;
 
     const config = trigger.data.config;

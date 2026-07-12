@@ -7,6 +7,9 @@ import { gmailClient } from "@/services/gmail-client";
 import { inboxClient } from "@/services/inbox-client";
 import type { InboxMessageItem } from "@/types/inbox";
 import type { GmailFilterPresetId } from "@/types/gmail";
+import { ChannelIcon } from "@/components/icons";
+import { GmailIcon } from "@/components/icons/gmail-icon";
+import { WhatsAppIcon } from "@/components/icons/whatsapp-icon";
 import { cn } from "@/lib/utils";
 
 export function UnifiedInbox() {
@@ -168,7 +171,14 @@ export function UnifiedInbox() {
                         <LabelChip>Important</LabelChip>
                       )}
                       {msg.channel === "GMAIL" && (
-                        <LabelChip muted>Gmail</LabelChip>
+                        <LabelChip muted icon={<GmailIcon size={12} />}>
+                          Gmail
+                        </LabelChip>
+                      )}
+                      {msg.channel === "WHATSAPP" && (
+                        <LabelChip muted icon={<WhatsAppIcon size={12} />}>
+                          WhatsApp
+                        </LabelChip>
                       )}
                     </div>
                   </button>
@@ -206,6 +216,18 @@ function MessageDetail({ message }: { message: InboxMessageItem }) {
           {new Date(message.receivedAt).toLocaleString()}
         </p>
         <div className="mt-2 flex flex-wrap gap-1">
+          <LabelChip
+            muted
+            icon={
+              message.channel === "WHATSAPP" ? (
+                <WhatsAppIcon size={12} />
+              ) : (
+                <GmailIcon size={12} />
+              )
+            }
+          >
+            {message.channel === "WHATSAPP" ? "WhatsApp" : "Gmail"}
+          </LabelChip>
           {message.isExtracted && (
             <LabelChip variant="extracted">
               ✓ Extracted to data table
@@ -279,9 +301,9 @@ function ChannelTabs({
   onChange: (v: "ALL" | "GMAIL" | "WHATSAPP") => void;
 }) {
   const tabs = [
-    { id: "GMAIL" as const, label: "Gmail" },
-    { id: "ALL" as const, label: "All" },
-    { id: "WHATSAPP" as const, label: "WhatsApp" },
+    { id: "GMAIL" as const, label: "Gmail", icon: <GmailIcon size={14} /> },
+    { id: "ALL" as const, label: "All", icon: null },
+    { id: "WHATSAPP" as const, label: "WhatsApp", icon: <WhatsAppIcon size={14} /> },
   ];
   return (
     <div className="flex rounded-lg border border-border p-0.5">
@@ -291,12 +313,13 @@ function ChannelTabs({
           type="button"
           onClick={() => onChange(t.id)}
           className={cn(
-            "rounded-md px-2.5 py-1 text-xs font-medium",
+            "flex items-center gap-1.5 rounded-md px-2.5 py-1 text-xs font-medium",
             value === t.id
               ? "bg-primary text-primary-foreground"
               : "text-muted-foreground"
           )}
         >
+          {t.icon}
           {t.label}
         </button>
       ))}
@@ -309,17 +332,19 @@ function LabelChip({
   muted,
   variant,
   title,
+  icon,
 }: {
   children: React.ReactNode;
   muted?: boolean;
   variant?: "extracted";
   title?: string;
+  icon?: React.ReactNode;
 }) {
   return (
     <span
       title={title}
       className={cn(
-        "rounded-full px-1.5 py-0.5 text-[10px]",
+        "inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px]",
         variant === "extracted" &&
           "bg-violet-100 font-medium text-violet-800 dark:bg-violet-950 dark:text-violet-200",
         muted && "bg-muted text-muted-foreground",

@@ -16,6 +16,14 @@ export const gmailClient = {
     return request<{
       configured: { google: boolean; encryption: boolean };
       account: GmailAccountSummary | null;
+      sheetsScopesGranted: boolean;
+      oauthProjectMismatch: boolean;
+      legacyOAuthToken: boolean;
+      legacyOAuthProject: string | null;
+      refreshTokenInvalid: boolean;
+      needsReconnect?: boolean;
+      reconnectMessage: string | null;
+      reconnectUrl: string;
     }>("/api/v1/integrations/gmail/status");
   },
 
@@ -27,6 +35,7 @@ export const gmailClient = {
         messagesSkipped: number;
       };
       newMessageIds: string[];
+      pipelineRan: boolean;
     }>("/api/v1/integrations/gmail/sync", { method: "POST" });
   },
 
@@ -55,4 +64,5 @@ export const gmailClient = {
   },
 
   connectUrl: "/api/v1/integrations/gmail/connect",
+  reconnectUrl: "/api/v1/integrations/gmail/connect?reconnect=1",
 };

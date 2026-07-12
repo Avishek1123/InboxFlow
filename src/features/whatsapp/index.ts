@@ -1,1 +1,1 @@
-export const WHATSAPP_FEATURE = "whatsapp" as const;
+export { WhatsAppIntegrationPanel } from "./components/whatsapp-integration-panel";

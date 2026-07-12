@@ -1,8 +1,12 @@
 import { apiError, apiSuccess } from "@/lib/api-response";
 import { testRunSchema } from "@/lib/validations/automation";
+import { findTriggerNodesByKind } from "@/server/automation/graph";
 import { automationExecutor } from "@/server/automation/executor";
 import { automationRepository } from "@/server/repositories/automation.repository";
-import type { AutomationTriggerPayload } from "@/types/automation";
+import type {
+  AutomationTriggerPayload,
+  WorkflowGraph,
+} from "@/types/automation";
 
 export const runtime = "nodejs";
 export const maxDuration = 120;
@@ -20,10 +24,25 @@ export async function POST(request: Request, { params }: Params) {
 
     const defaultPayload: AutomationTriggerPayload = {
       channel:
-        automation.triggerType === "NEW_WHATSAPP_MESSAGE"
+        automation.triggerType === "NEW_WHATSAPP_MESSAGE" ||
+        automation.triggerType === "NEW_TWILIO_WHATSAPP"
           ? "WHATSAPP"
-          : "GMAIL",
-      from: "test@example.com",
+          : automation.triggerType === "NEW_SMS"
+            ? "SMS"
+            : "GMAIL",
+      provider:
+        automation.triggerType === "NEW_SMS" ||
+        automation.triggerType === "NEW_TWILIO_WHATSAPP"
+          ? "twilio"
+          : automation.triggerType === "NEW_WHATSAPP_MESSAGE"
+            ? "meta"
+            : undefined,
+      from:
+        automation.triggerType === "NEW_SMS" ||
+        automation.triggerType === "NEW_TWILIO_WHATSAPP" ||
+        automation.triggerType === "NEW_WHATSAPP_MESSAGE"
+          ? "+15551234567"
+          : "test@example.com",
       subject: "Test trigger",
       body: "This is a test message for automation dry-run.",
       receivedAt: new Date().toISOString(),
@@ -36,9 +55,22 @@ export async function POST(request: Request, { params }: Params) {
         : {}),
     } as AutomationTriggerPayload;
 
+    const graph = automation.graph as unknown as WorkflowGraph;
+    const triggerNodes = findTriggerNodesByKind(graph, automation.triggerType);
+    const triggerNode =
+      triggerNodes[0] ??
+      graph.nodes.find(
+        (n) =>
+          n.type === "trigger" &&
+          (n.data.kind === "MESSAGE_RECEIVED" ||
+            n.data.kind === automation.triggerType)
+      );
+
     const executionId = await automationExecutor.run({
       automation,
       triggerPayload,
+      triggerNodeId: triggerNode?.id,
+      triggerType: automation.triggerType,
     });
 
     return apiSuccess({ executionId });

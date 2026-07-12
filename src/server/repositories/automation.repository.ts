@@ -31,6 +31,12 @@ export const automationRepository = {
     });
   },
 
+  async findActiveForOrganization(organizationId: string) {
+    return prisma.automation.findMany({
+      where: { organizationId, status: "ACTIVE" },
+    });
+  },
+
   async create(data: {
     organizationId: string;
     name: string;

@@ -21,6 +21,7 @@ enum OrganizationRole {
 enum AccountProvider {
   GMAIL
   WHATSAPP
+  TWILIO
 }
 
 enum ConnectedAccountStatus {
@@ -52,6 +53,7 @@ enum SyncRunStatus {
 enum MessageChannel {
   GMAIL
   WHATSAPP
+  SMS
 }
 
 enum MessageDirection {
@@ -101,6 +103,7 @@ enum WhatsAppTemplateStatus {
 enum WebhookProvider {
   GMAIL
   WHATSAPP
+  TWILIO
   STRIPE
   CLERK
 }
@@ -163,6 +166,8 @@ enum AutomationStatus {
 enum AutomationTriggerType {
   NEW_GMAIL_EMAIL
   NEW_WHATSAPP_MESSAGE
+  NEW_SMS
+  NEW_TWILIO_WHATSAPP
   SCHEDULED_TIME
   AI_EXTRACTION_COMPLETED
 }
@@ -173,6 +178,22 @@ enum AutomationExecutionStatus {
   COMPLETED
   FAILED
   RETRYING
+  CANCELLED
+  WAITING_APPROVAL
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum AgentRunStatus {
+  PENDING
+  RUNNING
+  COMPLETED
+  FAILED
   CANCELLED
 }
 
@@ -212,6 +233,9 @@ model Organization {
   id        String   @id @default(cuid())
   name      String
   slug      String   @unique
+  /// Cached Apps Script / GCP helper fields used by sheet provisioning
+  inboxflowAppsScriptId   String?
+  inboxflowScriptGcpReady Boolean? @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -230,6 +254,13 @@ model Organization {
   automationDataRecords AutomationDataRecord[]
   extractionTables      ExtractionTable[]
   extractionTableRows   ExtractionTableRow[]
+  sheetExports            SheetExport[]
+  agentRuns               AgentRun[]
+  approvalRequests        ApprovalRequest[]
+  conversationMemories    ConversationMemory[]
+  customerMemoryFacts     CustomerMemoryFact[]
+  chatThreads             ChatThread[]
+  aiUsageDaily            AiUsageDaily[]
 
   @@map("organizations")
 }
@@ -639,6 +670,8 @@ model AutomationExecution {
   organization Organization              @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   automation   Automation                @relation(fields: [automationId], references: [id], onDelete: Cascade)
   steps        AutomationExecutionStep[]
+  agentRuns    AgentRun[]
+  approvals    ApprovalRequest[]
 
   @@index([automationId, startedAt(sort: Desc)])
   @@index([organizationId, status, startedAt(sort: Desc)])
@@ -722,9 +755,38 @@ model ExtractionTable {
 
   organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   rows         ExtractionTableRow[]
+  sheetExports SheetExport[]
 
   @@index([organizationId])
   @@map("extraction_tables")
+}
+
+// ─── Google Sheets sync (Apps Script pulls structured extraction rows) ───────
+
+model SheetExport {
+  id                String    @id @default(cuid())
+  organizationId    String
+  extractionTableId String
+  label             String?
+  sheetTitle        String    @default("InboxFlow Export")
+  spreadsheetId     String?
+  spreadsheetUrl    String?   @db.Text
+  /// Bound Apps Script project id (for trigger install / script updates).
+  appsScriptId      String?
+  /// How often InboxFlow should pull Gmail + push this sheet (server keep-alive).
+  syncIntervalMinutes Int     @default(1)
+  apiKeyHash        String
+  apiKeyPrefix      String
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  lastFetchedAt     DateTime?
+
+  organization    Organization    @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  extractionTable ExtractionTable @relation(fields: [extractionTableId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, extractionTableId])
+  @@index([apiKeyHash])
+  @@map("sheet_exports")
 }
 
 model ExtractionTableRow {
@@ -749,4 +811,152 @@ model ExtractionTableRow {
   @@unique([tableId, messageId])
   @@index([tableId, createdAt(sort: Desc)])
   @@map("extraction_table_rows")
+}
+
+// ─── AI Agent Builder (tools, memory, HITL, chat, usage) ─────────────────────
+
+model AgentRun {
+  id                     String         @id @default(cuid())
+  organizationId         String
+  automationExecutionId  String?
+  goal                   String         @db.Text
+  status                 AgentRunStatus @default(PENDING)
+  model                  String?
+  provider               String?
+  inputTokens            Int            @default(0)
+  outputTokens           Int            @default(0)
+  estimatedCostUsd       Float          @default(0)
+  result                 Json?
+  errorMessage           String?        @db.Text
+  startedAt              DateTime       @default(now())
+  completedAt            DateTime?
+
+  organization Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  execution    AutomationExecution? @relation(fields: [automationExecutionId], references: [id], onDelete: SetNull)
+  toolCalls    AgentToolCall[]
+
+  @@index([organizationId, startedAt(sort: Desc)])
+  @@index([automationExecutionId])
+  @@map("agent_runs")
+}
+
+model AgentToolCall {
+  id           String   @id @default(cuid())
+  agentRunId   String
+  toolName     String
+  input        Json
+  output       Json?
+  status       String   @default("PENDING")
+  latencyMs    Int?
+  errorMessage String?  @db.Text
+  createdAt    DateTime @default(now())
+
+  agentRun AgentRun @relation(fields: [agentRunId], references: [id], onDelete: Cascade)
+
+  @@index([agentRunId, createdAt])
+  @@index([toolName])
+  @@map("agent_tool_calls")
+}
+
+model ApprovalRequest {
+  id             String         @id @default(cuid())
+  organizationId String
+  executionId    String?
+  stepId         String?
+  status         ApprovalStatus @default(PENDING)
+  summary        String
+  payload        Json           @default("{}")
+  decidedAt      DateTime?
+  decidedNote    String?        @db.Text
+  expiresAt      DateTime?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  execution    AutomationExecution? @relation(fields: [executionId], references: [id], onDelete: SetNull)
+
+  @@index([organizationId, status, createdAt(sort: Desc)])
+  @@index([executionId])
+  @@map("approval_requests")
+}
+
+model ConversationMemory {
+  id             String   @id @default(cuid())
+  organizationId String
+  conversationId String   @unique
+  summaryText    String   @db.Text
+  lastMessageAt  DateTime?
+  updatedAt      DateTime @updatedAt
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, updatedAt(sort: Desc)])
+  @@map("conversation_memories")
+}
+
+model CustomerMemoryFact {
+  id             String   @id @default(cuid())
+  organizationId String
+  contactId      String?
+  key            String
+  value          String   @db.Text
+  confidence     Float    @default(1)
+  source         String   @default("agent")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, contactId])
+  @@index([organizationId, key])
+  @@map("customer_memory_facts")
+}
+
+model ChatThread {
+  id             String   @id @default(cuid())
+  organizationId String
+  title          String   @default("Workspace chat")
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  messages     ChatMessage[]
+
+  @@index([organizationId, updatedAt(sort: Desc)])
+  @@map("chat_threads")
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  threadId  String
+  role      String
+  content   String   @db.Text
+  citations Json?
+  createdAt DateTime @default(now())
+
+  thread ChatThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
+
+  @@index([threadId, createdAt])
+  @@map("chat_messages")
+}
+
+model AiUsageDaily {
+  id             String   @id @default(cuid())
+  organizationId String
+  day            DateTime @db.Date
+  provider       String
+  model          String
+  inputTokens    Int      @default(0)
+  outputTokens   Int      @default(0)
+  estimatedCostUsd Float  @default(0)
+  requestCount   Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, day, provider, model])
+  @@index([organizationId, day(sort: Desc)])
+  @@map("ai_usage_daily")
 }

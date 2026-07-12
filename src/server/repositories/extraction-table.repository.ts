@@ -100,7 +100,7 @@ export const extractionTableRepository = {
     const rows = await prisma.extractionTableRow.findMany({
       where: { tableId, organizationId },
       orderBy: { createdAt: "desc" },
-      take: 200,
+      take: 1000,
     });
     return rows.map((r) => ({
       id: r.id,

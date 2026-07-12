@@ -7,6 +7,12 @@ export type GmailOAuthState = {
   organizationId: string;
   userId: string;
   nonce: string;
+  /** OAuth completed in a popup; callback notifies opener via postMessage. */
+  popup?: boolean;
+  /** After OAuth, install Apps Script trigger for this sheet export. */
+  sheetExportId?: string;
+  /** Parent window origin for postMessage (popup flow). */
+  openerOrigin?: string;
 };
 
 export type GmailConnectResponse = {

@@ -30,3 +30,11 @@ export function isFirebaseAdminConfigured(): boolean {
       process.env.FIREBASE_PRIVATE_KEY
   );
 }
+
+/** Warn when Admin and Web Firebase apps point at different projects. */
+export function getFirebaseProjectMismatch(): string | null {
+  const admin = process.env.FIREBASE_PROJECT_ID?.trim();
+  const web = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID?.trim();
+  if (!admin || !web || admin === web) return null;
+  return `FIREBASE_PROJECT_ID (${admin}) does not match NEXT_PUBLIC_FIREBASE_PROJECT_ID (${web}).`;
+}

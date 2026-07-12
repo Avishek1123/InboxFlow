@@ -22,6 +22,14 @@ FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\\n..."`}
         <strong>Phone</strong> in Firebase → Authentication → Sign-in method.
         Phone auth works with Indian +91 numbers.
       </p>
+      <p className="mt-3 text-amber-800 dark:text-amber-200">
+        If the browser shows <code className="rounded bg-amber-100 px-1 dark:bg-amber-900">accounts:lookup 400</code>,
+        clear stale auth: sign out, or DevTools → Application → clear site data for localhost,
+        then restart <code className="rounded bg-amber-100 px-1 dark:bg-amber-900">npm run dev</code>.
+        Ensure <code className="rounded bg-amber-100 px-1 dark:bg-amber-900">FIREBASE_PROJECT_ID</code> matches{" "}
+        <code className="rounded bg-amber-100 px-1 dark:bg-amber-900">NEXT_PUBLIC_FIREBASE_PROJECT_ID</code> (both{" "}
+        <code className="rounded bg-amber-100 px-1 dark:bg-amber-900">inboxflow-32f26</code>).
+      </p>
     </div>
   );
 }

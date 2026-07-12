@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { ChannelIcon } from "@/components/icons";
+import { GmailIcon } from "@/components/icons/gmail-icon";
 import type { DashboardOverview } from "@/server/repositories/dashboard.repository";
 import { cn } from "@/lib/utils";
 
@@ -25,7 +27,7 @@ export function DashboardOverview({ userName, orgName, data }: Props) {
   return (
     <div className="w-full space-y-8 pb-8">
       {/* Hero */}
-      <section className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-zinc-50 via-white to-zinc-100 p-6 dark:from-zinc-900 dark:via-zinc-950 dark:to-zinc-900 sm:p-8">
+      <section className="relative overflow-hidden rounded-2xl border border-border bg-gradient-to-br from-muted via-background to-white p-6 dark:from-zinc-900 dark:via-zinc-950 dark:to-zinc-900 sm:p-8">
         <div className="relative z-10 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
@@ -75,12 +77,14 @@ export function DashboardOverview({ userName, orgName, data }: Props) {
               title="Connect Gmail"
               description="Sync email threads into your unified inbox."
               href="/integrations/gmail"
+              channel="GMAIL"
             />
             <SetupStep
               done={integrations.whatsapp.connected}
               title="Connect WhatsApp Business"
               description="Receive and reply to WhatsApp messages."
               href="/integrations/whatsapp"
+              channel="WHATSAPP"
             />
             <SetupStep
               done={stats.totalAutomations > 0}
@@ -92,7 +96,7 @@ export function DashboardOverview({ userName, orgName, data }: Props) {
               done={stats.aiExtractions7d > 0}
               title="Try AI extraction"
               description="Summarize messages and extract structured data."
-              href="/ai-extraction"
+              href="/google-sheets"
             />
           </ol>
         </section>
@@ -312,26 +316,33 @@ export function DashboardOverview({ userName, orgName, data }: Props) {
       {/* Quick actions */}
       <section>
         <h2 className="text-sm font-semibold">Quick actions</h2>
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+          <QuickAction href="/inbox" title="Open inbox" description="All conversations" />
           <QuickAction
             href="/automations"
-            title="New automation"
-            description="Build a visual workflow"
+            title="Automations"
+            description="Build workflows"
+          />
+          <QuickAction
+            href="/google-sheets"
+            title="Google Sheets"
+            description="Export to spreadsheet"
+          />
+          <QuickAction
+            href="/integrations/gmail"
+            title="Gmail"
+            description="Connect & sync"
+            icon={<GmailIcon size={22} />}
+          />
+          <QuickAction
+            href="/integrations/whatsapp"
+            title="WhatsApp"
+            description="Business API"
           />
           <QuickAction
             href="/ai-extraction"
             title="AI playground"
-            description="Summarize & extract data"
-          />
-          <QuickAction
-            href="/integrations/gmail"
-            title="Gmail setup"
-            description="OAuth & sync settings"
-          />
-          <QuickAction
-            href="/settings"
-            title="Settings"
-            description="Workspace preferences"
+            description="Summarize & extract"
           />
         </div>
       </section>
@@ -409,9 +420,12 @@ function IntegrationCard({
       <div className={cn("h-1", accentBar)} />
       <div className="p-5">
         <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="font-semibold">{name}</p>
-            <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+          <div className="flex min-w-0 items-start gap-3">
+            <ChannelIcon channel={accent === "whatsapp" ? "WHATSAPP" : "GMAIL"} />
+            <div className="min-w-0">
+              <p className="font-semibold">{name}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
+            </div>
           </div>
           <span
             className={cn(
@@ -475,24 +489,37 @@ function SetupStep({
   title,
   description,
   href,
+  channel,
 }: {
   done: boolean;
   title: string;
   description: string;
   href: string;
+  channel?: "GMAIL" | "WHATSAPP";
 }) {
   return (
     <li className="flex items-start gap-3">
-      <span
-        className={cn(
-          "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
-          done
-            ? "bg-emerald-600 text-white"
-            : "border border-border bg-muted text-muted-foreground"
-        )}
-      >
-        {done ? "✓" : ""}
-      </span>
+      {channel ? (
+        <span className="relative mt-0.5 shrink-0">
+          <ChannelIcon channel={channel} iconSize={14} className="h-7 w-7" />
+          {done && (
+            <span className="absolute -bottom-0.5 -right-0.5 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-600 text-[9px] font-bold text-white">
+              ✓
+            </span>
+          )}
+        </span>
+      ) : (
+        <span
+          className={cn(
+            "mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
+            done
+              ? "bg-emerald-600 text-white"
+              : "border border-border bg-muted text-muted-foreground"
+          )}
+        >
+          {done ? "✓" : ""}
+        </span>
+      )}
       <div className="min-w-0 flex-1">
         <Link href={href} className="text-sm font-medium hover:underline">
           {title}
@@ -539,21 +566,6 @@ function HealthRow({
   return <div className="flex items-center justify-between">{content}</div>;
 }
 
-function ChannelIcon({ channel }: { channel: string }) {
-  const isWa = channel === "WHATSAPP";
-  return (
-    <span
-      className={cn(
-        "flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-xs font-bold",
-        isWa
-          ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300"
-          : "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300"
-      )}
-    >
-      {isWa ? "WA" : "G"}
-    </span>
-  );
-}
 
 function StatusBadge({ status }: { status: string }) {
   const styles: Record<string, string> = {
@@ -579,16 +591,19 @@ function QuickAction({
   href,
   title,
   description,
+  icon,
 }: {
   href: string;
   title: string;
   description: string;
+  icon?: React.ReactNode;
 }) {
   return (
     <Link
       href={href}
       className="rounded-xl border border-border p-4 transition-colors hover:bg-muted/50"
     >
+      {icon && <div className="mb-2">{icon}</div>}
       <p className="text-sm font-medium">{title}</p>
       <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
     </Link>

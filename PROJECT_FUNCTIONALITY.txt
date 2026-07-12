@@ -1,0 +1,279 @@
+InboxFlow AI — Product Flow & Functionality
+===========================================
+(What the product does — not a file/folder list)
+
+
+1. WHAT THIS PRODUCT IS
+-----------------------
+InboxFlow AI is a multi-tenant workspace app that unifies Gmail and WhatsApp
+(and optional Twilio SMS/WhatsApp) into one inbox, extracts structured data
+with AI into custom tables, syncs those rows to Google Sheets, and runs
+Zapier-style automations (triggers → actions).
+
+Users sign in, connect channels, sync or receive messages, extract fields
+with AI, push data to Sheets, and optionally automate replies and workflows.
+
+
+2. AUTH & WORKSPACE
+-------------------
+What you can do:
+  - Sign up / sign in with email + password
+  - Continue with Google (popup)
+  - Sign in with phone OTP (+91 style)
+
+How it works:
+  1. Firebase authenticates the user in the browser
+  2. App exchanges the Firebase ID token for a secure session cookie
+  3. On first login, a personal organization/workspace is created
+  4. All data (inbox, tables, sheets, automations) is scoped to that org
+
+Notes:
+  - Roles exist (Owner / Admin / Member) but there is no invite/org-switcher UI yet
+  - One workspace is created automatically per user
+
+
+3. DASHBOARD
+------------
+What you can do:
+  - See overview stats and recent activity
+  - Check which integrations are connected
+  - Manage custom AI data tables (create columns, extract from inbox)
+
+
+4. GMAIL INTEGRATION
+--------------------
+What you can do:
+  - Connect Gmail with Google OAuth
+  - Choose which mail to sync (Inbox, Starred, Important, Unread, Sent, etc.)
+  - Sync now (manual) or rely on background cron sync
+  - Disconnect / clear synced data / reconnect for extra Google scopes
+
+How it works:
+  1. User connects Gmail → tokens stored encrypted
+  2. Sync pulls matching messages into Conversations + Messages
+  3. New matching mail can fire automations ("On new email")
+  4. If Google Sheets exports exist, auto-pipeline can AI-extract and update sheets
+
+Default sheet-related filter: starred Gmail (configurable via triggers/filters).
+
+
+5. WHATSAPP (META CLOUD API)
+----------------------------
+What you can do:
+  - Connect by pasting Access Token, Phone Number ID, and WABA ID
+  - Receive inbound text messages into the inbox
+  - Disconnect / clear data
+  - Queue outbound WhatsApp messages (via automations / send-pending)
+
+How it works:
+  1. Credentials verified against Meta Graph API
+  2. Meta sends webhooks to the app (verify token + signature check)
+  3. Inbound text → stored in inbox → can fire automations
+  4. If Sheets are linked, each new message can trigger AI extract → sheet update
+
+Local/dev note: Meta needs a public HTTPS URL (ngrok/localtunnel) for webhooks.
+
+
+6. TWILIO (SMS + OPTIONAL WHATSAPP)
+-----------------------------------
+What you can do:
+  - Connect Account SID, Auth Token, and phone numbers
+  - Receive SMS (and Twilio WhatsApp) into the inbox
+
+How it works:
+  1. Credentials verified with Twilio
+  2. Twilio webhook posts inbound messages
+  3. Messages land in inbox and can trigger automations
+
+
+7. UNIFIED INBOX
+----------------
+What you can do:
+  - View messages from Gmail / WhatsApp (and Twilio) in one place
+  - Filter by channel
+  - Trigger Gmail sync from the inbox UI
+
+How it works:
+  Messages arrive from Gmail sync or WhatsApp/Twilio webhooks and are listed
+  for the organization.
+
+Note: Inbox is primarily read/sync focused today — compose/reply is not a
+full unified composer; outbound is mainly via automations / WhatsApp jobs.
+
+
+8. AI EXTRACTION — PLAYGROUND
+-----------------------------
+Page: AI Extraction
+
+What you can do:
+  - Paste sample email or WhatsApp text
+  - Run: Full analysis, Summarize, Extract (lead/order/invoice/all), Auto-reply
+
+How it works:
+  1. Request goes to AI APIs
+  2. Provider fallback chain runs (see section 12)
+  3. Result is validated JSON and can be cached
+  4. Successful runs can fire "AI extraction completed" automations
+
+
+9. AI EXTRACTION — CUSTOM DATA TABLES
+-------------------------------------
+Page: Dashboard → Data tables (and used by Google Sheets)
+
+What you can do:
+  - Create a table with custom columns (label + optional hint)
+  - Extract from inbox messages into those columns
+  - Edit / delete rows
+  - Link a table to a Google Sheet export
+
+How it works (per message, per linked table):
+  1. AI is asked to return JSON with exactly your column keys
+  2. Message body is truncated (max ~12,000 characters)
+  3. Row is saved (one row per message per table)
+  4. Already-extracted messages are skipped unless force-refresh
+
+Typical cost: ~300–1,000 tokens per short/medium message; worst case ~4,000–4,500
+tokens per single extraction query (1 message × 1 table).
+
+
+10. GOOGLE SHEETS EXPORT & AUTO-SYNC
+------------------------------------
+Page: Google Sheets
+
+What you can do:
+  - Create a Google Sheet linked to an extraction table
+  - Install Apps Script auto-sync timer on the sheet
+  - Sync now / update script / regenerate API key
+  - See tunnel/public URL health in local development
+
+End-to-end flow (Gmail → Sheet):
+  1. Mail matching filters is synced into InboxFlow
+  2. AI extracts fields into the linked table
+  3. Sheet is updated via Apps Script timer (default) and/or server push
+
+End-to-end flow (WhatsApp → Sheet):
+  1. Inbound WhatsApp text arrives via webhook
+  2. Message stored in inbox
+  3. Pipeline extracts that message into linked table(s)
+  4. Sheet updates (script timer and/or server push)
+
+Two update paths:
+  - Apps Script timer (default): sheet calls the app’s sheet-sync API with an API key
+  - Server push: app writes to Sheets after extract (when configured)
+
+Important: Apps Script cannot reach localhost — local dev uses ngrok or localtunnel
+to expose a public HTTPS URL.
+
+
+11. AUTOMATIONS (WORKFLOW BUILDER)
+----------------------------------
+Pages: Automations list + builder for one automation
+
+What you can do:
+  - Build n8n/Zapier-style flows on a canvas (drag nodes, connect edges)
+  - Activate / pause / run manually
+  - View recent executions
+
+Triggers (examples):
+  - New Gmail email (with label/filter options)
+  - New WhatsApp / SMS message
+  - Scheduled time (cron)
+  - AI extraction completed
+
+Actions (examples):
+  - Send email (Gmail)
+  - Send WhatsApp / SMS
+  - Create contact
+  - Call AI
+  - Store data
+  - HTTP webhook
+
+How it works:
+  1. Event happens (sync, webhook, AI done, or cron)
+  2. Dispatcher finds matching active automations
+  3. Executor walks the graph and records each run/step
+  4. Templates like {{trigger.from}} / {{trigger.body}} can fill action fields
+
+
+12. AI PROVIDERS
+----------------
+Supported providers (configure API keys in .env):
+  - Groq
+  - Google Gemini
+  - OpenRouter (can point at many paid models)
+
+Default priority: groq → gemini → openrouter
+(You can change order with AI_PROVIDER_PRIORITY.)
+
+Used for:
+  - Playground analysis
+  - Custom table extraction (mail/WhatsApp → columns → sheet)
+  - Automation "Call AI" nodes
+
+Rate limit: org-level AI requests per minute (configurable).
+
+
+13. BACKGROUND / SYSTEM JOBS
+----------------------------
+  - Cron: Gmail sync for all connected accounts
+  - Cron: scheduled automations + retry failed runs
+  - WhatsApp outbound job processing
+  - Webhook logging / idempotency for Meta events
+  - Dev tunnel auto-start (ngrok preferred, else localtunnel) for public URL
+
+Redis / BullMQ / Trigger.dev may be configured in env but cron + webhooks
+are the main runtime path today.
+
+
+14. SETTINGS / BILLING / SCHEDULER
+---------------------------------
+  - Settings: appearance / theme
+  - Billing: placeholder (not a full billing product yet)
+  - Scheduler: placeholder UI (outbound scheduling exists partly server-side
+    for WhatsApp jobs, but not a full scheduler product UI)
+
+
+15. MAIN PRODUCT FLOW (BIG PICTURE)
+-----------------------------------
+
+  Sign in (Firebase)
+        │
+        ▼
+  Connect channels (Gmail / WhatsApp / Twilio)
+        │
+        ▼
+  Messages enter Unified Inbox
+   (Gmail sync  |  WhatsApp webhook  |  Twilio webhook)
+        │
+        ├──────────────► Automations (optional)
+        │                  send mail/WA, call AI, webhook, etc.
+        │
+        ▼
+  AI extract into Custom Data Tables
+        │
+        ▼
+  Google Sheets auto-sync
+   (Apps Script timer and/or server push)
+
+
+16. QUICK CAPABILITY CHECKLIST
+------------------------------
+  [x] Firebase auth (email, Google, phone)
+  [x] Org workspace (auto-created)
+  [x] Gmail connect + sync + filters
+  [x] WhatsApp Meta connect + inbound webhook
+  [x] Twilio SMS/WhatsApp inbound
+  [x] Unified inbox (read/sync)
+  [x] AI playground
+  [x] Custom extraction tables
+  [x] Google Sheets create + auto-sync
+  [x] Automations builder + executions
+  [x] Cron sync + scheduled automations
+  [x] Dev public tunnel for Sheets/webhooks
+  [ ] Full billing product
+  [ ] Full scheduler UI
+  [ ] Multi-org invites / team switcher
+  [ ] Full compose/reply in unified inbox
+
+
+End of document.

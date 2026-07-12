@@ -7,14 +7,23 @@ export function createOAuth2Client() {
   return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
-export function getGmailConnectUrl(organizationId: string, userId: string) {
+export function getGmailConnectUrl(
+  organizationId: string,
+  userId: string,
+  options?: {
+    popup?: boolean;
+    sheetExportId?: string;
+    openerOrigin?: string;
+  }
+) {
   const { scopes } = getGoogleOAuthConfig();
   const client = createOAuth2Client();
-  const state = createOAuthState(organizationId, userId);
+  const state = createOAuthState(organizationId, userId, options);
 
   return client.generateAuthUrl({
     access_type: "offline",
-    prompt: "consent",
+    prompt: "consent select_account",
+    include_granted_scopes: true,
     scope: scopes,
     state,
   });

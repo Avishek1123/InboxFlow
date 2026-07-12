@@ -1,5 +1,8 @@
 import { NextResponse } from "next/server";
-import { isFirebaseAdminConfigured } from "@/lib/firebase/admin";
+import {
+  getFirebaseProjectMismatch,
+  isFirebaseAdminConfigured,
+} from "@/lib/firebase/admin";
 import {
   clearSessionCookie,
   createSessionCookie,
@@ -11,6 +14,15 @@ const ADMIN_SETUP_MESSAGE =
   "Firebase Admin keys missing. Add FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY to .env (Firebase Console → Project settings → Service accounts → Generate new private key), then restart npm run dev.";
 
 export async function POST(request: Request) {
+  const projectMismatch = getFirebaseProjectMismatch();
+  if (projectMismatch) {
+    console.error("[auth/session]", projectMismatch);
+    return NextResponse.json(
+      { error: { code: "FIREBASE_CONFIG_MISMATCH", message: projectMismatch } },
+      { status: 503 }
+    );
+  }
+
   if (!isFirebaseAdminConfigured()) {
     return NextResponse.json(
       { error: { code: "ADMIN_NOT_CONFIGURED", message: ADMIN_SETUP_MESSAGE } },

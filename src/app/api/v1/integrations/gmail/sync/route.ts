@@ -1,4 +1,5 @@
 import { apiError, apiSuccess } from "@/lib/api-response";
+import { formatGmailSyncError } from "@/lib/gmail/google-api-errors";
 import { requireOrganization } from "@/server/organizations/require-organization";
 import { syncGmailAccount } from "@/server/gmail/sync";
 import { gmailRepository } from "@/server/repositories/gmail.repository";
@@ -18,9 +19,10 @@ export async function POST() {
     const result = await syncGmailAccount(account);
     return apiSuccess(result);
   } catch (err) {
+    const friendly = formatGmailSyncError(err);
     return apiError(
       "SYNC_FAILED",
-      err instanceof Error ? err.message : "Sync failed",
+      friendly ?? (err instanceof Error ? err.message : "Sync failed"),
       500
     );
   }

@@ -14,6 +14,10 @@ import {
   type User,
 } from "firebase/auth";
 import { getFirebaseAuth, isFirebaseConfigured } from "@/lib/firebase/client";
+import {
+  FIREBASE_PROJECT_STORAGE_KEY,
+  validateFirebaseClientConfig,
+} from "@/lib/firebase/validate-config";
 
 type AuthContextValue = {
   user: User | null;
@@ -67,20 +71,61 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
+    const configIssues = validateFirebaseClientConfig();
+    if (configIssues.length > 0) {
+      console.warn("[Firebase config]", configIssues.join(" "));
+    }
+
     const auth = getFirebaseAuth();
-    const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
-      setUser(firebaseUser);
-      if (firebaseUser) {
-        try {
-          await persistSession(firebaseUser);
-        } catch {
-          /* session API may fail if admin not configured yet */
+    let cancelled = false;
+
+    async function initAuth() {
+      const projectId = process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID?.trim();
+      if (typeof window !== "undefined" && projectId) {
+        const previous = localStorage.getItem(FIREBASE_PROJECT_STORAGE_KEY);
+        if (previous && previous !== projectId) {
+          await firebaseSignOut(auth);
+          await fetch("/api/auth/session", { method: "DELETE" });
         }
+        localStorage.setItem(FIREBASE_PROJECT_STORAGE_KEY, projectId);
       }
-      setLoading(false);
+
+      const unsub = onAuthStateChanged(auth, async (firebaseUser) => {
+        if (cancelled) return;
+
+        if (firebaseUser) {
+          try {
+            await firebaseUser.getIdToken(true);
+            setUser(firebaseUser);
+            try {
+              await persistSession(firebaseUser);
+            } catch {
+              /* session API may fail if admin not configured yet */
+            }
+          } catch (err) {
+            console.warn("[Firebase] Stale session cleared:", err);
+            await firebaseSignOut(auth);
+            await fetch("/api/auth/session", { method: "DELETE" });
+            setUser(null);
+          }
+        } else {
+          setUser(null);
+        }
+        setLoading(false);
+      });
+
+      return unsub;
+    }
+
+    let unsub: (() => void) | undefined;
+    void initAuth().then((u) => {
+      unsub = u;
     });
 
-    return () => unsub();
+    return () => {
+      cancelled = true;
+      unsub?.();
+    };
   }, [configured]);
 
   const value = useMemo(

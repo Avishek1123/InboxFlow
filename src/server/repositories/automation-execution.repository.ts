@@ -70,6 +70,17 @@ export const automationExecutionRepository = {
     });
   },
 
+  async markWaitingApproval(id: string, context: ExecutionContext, note: string) {
+    return prisma.automationExecution.update({
+      where: { id },
+      data: {
+        status: "WAITING_APPROVAL",
+        context: context as unknown as Prisma.InputJsonValue,
+        errorMessage: note,
+      },
+    });
+  },
+
   async scheduleRetry(
     id: string,
     retryCount: number,

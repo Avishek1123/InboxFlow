@@ -1,12 +1,13 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { isEncryptionConfigured } from "@/lib/crypto/tokens";
 import { isGoogleOAuthConfigured } from "@/lib/gmail/config";
 import { getGmailConnectUrl } from "@/server/gmail/oauth";
 import { requireOrganization } from "@/server/organizations/require-organization";
+import { gmailRepository } from "@/server/repositories/gmail.repository";
 
 export const runtime = "nodejs";
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   if (!isGoogleOAuthConfigured()) {
     return NextResponse.json(
       {
@@ -33,6 +34,36 @@ export async function GET() {
   }
 
   const { organization, user } = await requireOrganization();
-  const url = getGmailConnectUrl(organization.id, user.id);
+  const reconnect = request.nextUrl.searchParams.get("reconnect") === "1";
+  const popup = request.nextUrl.searchParams.get("popup") === "1";
+  const sheetExportId = request.nextUrl.searchParams.get("sheetExportId");
+  const openerOriginParam = request.nextUrl.searchParams.get("openerOrigin");
+
+  // Prefer the browser tab origin (localhost vs tunnel) so postMessage works.
+  let openerOrigin = new URL(request.url).origin;
+  if (openerOriginParam) {
+    try {
+      const parsed = new URL(openerOriginParam);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        openerOrigin = parsed.origin;
+      }
+    } catch {
+      /* keep request origin */
+    }
+  }
+
+  // Popup sheet flow: keep existing refresh token; only re-consent for scopes.
+  if (reconnect && !popup) {
+    const existing = await gmailRepository.findGmailAccount(organization.id);
+    if (existing) {
+      await gmailRepository.disconnect(existing.id);
+    }
+  }
+
+  const url = getGmailConnectUrl(organization.id, user.id, {
+    popup,
+    sheetExportId: sheetExportId ?? undefined,
+    openerOrigin,
+  });
   return NextResponse.redirect(url);
 }

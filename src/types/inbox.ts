@@ -3,7 +3,7 @@ import type { GmailTriggerSettings } from "@/types/gmail";
 export type InboxMessageItem = {
   id: string;
   conversationId: string;
-  channel: "GMAIL" | "WHATSAPP";
+  channel: "GMAIL" | "WHATSAPP" | "SMS";
   fromAddress: string;
   subject: string | null;
   bodyText: string | null;

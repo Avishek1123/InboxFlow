@@ -21,7 +21,7 @@ export default async function SignInPage({ searchParams }: Props) {
         </p>
       </div>
       {isFirebaseConfigured() ? (
-        <AuthForm mode="sign-in" redirectTo={redirect ?? "/dashboard"} />
+        <AuthForm mode="sign-in" redirectTo={redirect ?? "/create"} />
       ) : (
         <FirebaseSetupNotice />
       )}

@@ -7,6 +7,7 @@ const PUBLIC_PATHS = [
   "/sign-up",
   "/api/health",
   "/api/auth/session",
+  "/api/auth/clear-session",
   "/api/v1/webhooks",
 ];
 
@@ -17,6 +18,8 @@ function isPublic(pathname: string): boolean {
   if (pathname.startsWith("/api/cron")) return true;
   if (pathname.startsWith("/api/v1/webhooks")) return true;
   if (pathname === "/api/v1/integrations/gmail/callback") return true;
+  /** Apps Script + tunnel health (API key auth on /data only). */
+  if (pathname.startsWith("/api/v1/sheet-sync")) return true;
   return false;
 }
 
@@ -28,16 +31,9 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   if (isPublic(pathname)) {
-    const session = request.cookies.get(SESSION_COOKIE_NAME)?.value;
-    if (
-      session &&
-      (pathname === "/sign-in" ||
-        pathname.startsWith("/sign-in/") ||
-        pathname === "/sign-up" ||
-        pathname.startsWith("/sign-up/"))
-    ) {
-      return NextResponse.redirect(new URL("/dashboard", request.url));
-    }
+    // Do not redirect to /dashboard based on cookie presence alone — an expired or
+    // invalid __session cookie would loop: middleware → dashboard → sign-in → middleware.
+    // Auth layout uses verifySessionCookie and only redirects when the session is valid.
     return NextResponse.next();
   }
 
