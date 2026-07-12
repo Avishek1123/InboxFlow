@@ -512,9 +512,9 @@ export function CreateStudio() {
                 </a>
                 <p className="mt-2 text-[11px] text-muted-foreground">
                   {ready.sheet.autoSyncOn
-                    ? `InboxFlow updates this sheet every ${ready.sheet.syncMinutes ?? syncIntervalMinutes} min while the app is running (Gmail → AI → Google Sheets). No Apps Script required.`
+                    ? `Every ${ready.sheet.syncMinutes ?? syncIntervalMinutes} min, Apps Script in your sheet reads starred Gmail, structures fields with Gemini, and writes rows — InboxFlow server is not required for the timer.`
                     : asksForAutoUpdate
-                      ? `Auto-update every ${ready.sheet.syncMinutes ?? syncIntervalMinutes} min is requested — finish Google Sheets permission if prompted, then keep InboxFlow running.`
+                      ? `Open the sheet → InboxFlow → Enable auto-sync (authorize Gmail + script). Then it runs every ${ready.sheet.syncMinutes ?? syncIntervalMinutes} min on its own.`
                       : "Your sheet is ready. Mention auto-update in a new prompt if you want a refresh schedule."}
                   {ready.sheet.setupNote ? ` ${ready.sheet.setupNote}` : ""}
                 </p>

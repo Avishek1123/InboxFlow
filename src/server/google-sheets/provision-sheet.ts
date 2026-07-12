@@ -1,5 +1,4 @@
 import { google } from "googleapis";
-import { isLocalAppUrl } from "@/lib/app-url";
 import { formatGoogleApiDisabledError } from "@/lib/gmail/google-api-errors";
 import { assertInboxflowOAuthClientConfigured } from "@/lib/gmail/inboxflow-gcp";
 import {
@@ -12,7 +11,7 @@ import { getGoogleAuthClientForOrganization } from "@/server/google/auth-client"
 import { ensureSheetsOAuthClient } from "@/server/google/ensure-sheets-auth";
 import { finalizeBoundScriptProject } from "@/server/google-sheets/finalize-bound-script";
 import { buildSheetSyncPayload } from "@/server/sheet-sync/build-export-payload";
-import { buildAppsScriptConfig } from "@/server/sheet-sync/build-apps-script-config";
+import { buildStandaloneAppsScriptConfig } from "@/server/sheet-sync/standalone-script-config";
 import { writePayloadToSpreadsheet } from "@/server/google-sheets/write-sheet-data";
 
 function isInsufficientScopesError(err: unknown): boolean {
@@ -25,9 +24,9 @@ function isInsufficientScopesError(err: unknown): boolean {
 }
 
 /**
- * Creates a Google Spreadsheet and writes table data via Sheets API.
- * Never embeds localhost into Apps Script (Google cannot resolve it → DNS errors).
- * Apps Script auto-sync is best-effort — never roll back a working sheet URL.
+ * Creates a Google Spreadsheet, seeds rows, and installs a standalone Apps Script:
+ * starred Gmail → Gemini AI → sheet (runs in Google's cloud every N minutes).
+ * InboxFlow server is not called by the timer.
  */
 export async function provisionGoogleSheetExport(params: {
   organizationId: string;
@@ -42,7 +41,6 @@ export async function provisionGoogleSheetExport(params: {
   appsScriptId: string;
   scriptReady: boolean;
   setupNote?: string;
-  /** True when the sheet exists but auto-sync still needs InboxFlow enable + Google consent. */
   needsAutoSyncSetup?: boolean;
 }> {
   assertInboxflowOAuthClientConfigured();
@@ -94,46 +92,21 @@ export async function provisionGoogleSheetExport(params: {
     );
   }
 
-  const { sheetSyncVia, sheetTriggerMinutes } = getSyncPipelineConfig();
-  const triggerMinutes = params.triggerMinutes ?? sheetTriggerMinutes;
-
-  // Default path: InboxFlow server pushes via Sheets API (Gmail → AI → sheet).
-  // No Apps Script / public webhook URL required.
-  if (sheetSyncVia === "server") {
-    return {
-      spreadsheetId,
-      spreadsheetUrl,
-      appsScriptId: "",
-      scriptReady: true,
-      needsAutoSyncSetup: false,
-      setupNote: `Sheet updates from InboxFlow every ${triggerMinutes} min while the app is running (Gmail sync → AI extract → Sheets API). No Apps Script needed.`,
-    };
-  }
-
-  // Legacy path: Google Apps Script polls InboxFlow (needs a public HTTPS URL).
-  if (isLocalAppUrl(params.apiBaseUrl)) {
-    return {
-      spreadsheetId,
-      spreadsheetUrl,
-      appsScriptId: "",
-      scriptReady: false,
-      needsAutoSyncSetup: true,
-      setupNote:
-        "Sheet is ready with your data. Click Enable auto-sync in InboxFlow to install the timer with a public URL (start npm run dev with NGROK_AUTHTOKEN, or deploy). Syncing from the sheet menu will not work until then.",
-    };
-  }
+  const triggerMinutes =
+    params.triggerMinutes ?? getSyncPipelineConfig().sheetTriggerMinutes;
 
   try {
+    const scriptConfig = await buildStandaloneAppsScriptConfig({
+      organizationId: params.organizationId,
+      tableId: params.tableId,
+      sheetTitle: params.sheetTitle,
+      triggerMinutes,
+    });
+
     const finalized = await finalizeBoundScriptProject({
       auth,
       spreadsheetId,
-      scriptConfig: buildAppsScriptConfig({
-        apiBaseUrl: params.apiBaseUrl,
-        apiKey: params.apiKey,
-        tableId: params.tableId,
-        sheetTitle: params.sheetTitle,
-        triggerMinutes,
-      }),
+      scriptConfig,
     });
 
     return {
@@ -142,13 +115,17 @@ export async function provisionGoogleSheetExport(params: {
       appsScriptId: finalized.scriptId,
       scriptReady: finalized.triggerInstalled,
       needsAutoSyncSetup: !finalized.triggerInstalled,
-      setupNote: finalized.setupNote,
+      setupNote:
+        finalized.setupNote ??
+        (finalized.triggerInstalled
+          ? `Apps Script timer is on (every ${triggerMinutes} min): starred Gmail → Gemini → this sheet. InboxFlow server is not used for the timer.`
+          : `Sheet is ready. Open the sheet → InboxFlow → Enable auto-sync so Google can authorize Gmail + Gemini (every ${triggerMinutes} min).`),
     };
   } catch (scriptErr) {
     const note =
       scriptErr instanceof Error
-        ? `Sheet is ready. Click Enable auto-sync in InboxFlow to finish the timer (${scriptErr.message}).`
-        : "Sheet is ready. Click Enable auto-sync in InboxFlow to finish the timer.";
+        ? `Sheet is ready. Open the sheet → InboxFlow → Enable auto-sync (${scriptErr.message}).`
+        : "Sheet is ready. Open the sheet → InboxFlow → Enable auto-sync.";
     console.warn("[provisionGoogleSheetExport] Apps Script skipped:", scriptErr);
     return {
       spreadsheetId,

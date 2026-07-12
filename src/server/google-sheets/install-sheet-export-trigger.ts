@@ -1,6 +1,5 @@
 import type { OAuth2Client } from "google-auth-library";
 import { google } from "googleapis";
-import { assertHealthyPublicAppUrl, ensureHealthyPublicAppUrl } from "@/server/dev-tunnel/ensure-healthy-public-url";
 import {
   inboxflowGcpLinkStepsMessage,
   inboxflowSheetTriggerFallbackMessage,
@@ -10,12 +9,10 @@ import {
   isAppsScriptUserSettingsError,
 } from "@/lib/gmail/google-api-errors";
 import { getSyncPipelineConfig } from "@/lib/gmail/sync-pipeline-config";
-import { resolveSheetSyncApiKey } from "@/server/sheet-sync/resolve-api-key";
-import { buildAppsScriptConfig } from "@/server/sheet-sync/build-apps-script-config";
 import { pushBoundScriptContent } from "@/server/google-sheets/finalize-bound-script";
 import { installAppsScriptTimeTrigger } from "@/server/google-sheets/install-apps-script-trigger";
-import { pushSheetExportDataFromServer } from "@/server/google-sheets/push-sheet-export-data";
 import { boundScriptHasInboxFlowCode } from "@/server/google-sheets/verify-bound-script";
+import { buildStandaloneAppsScriptConfig } from "@/server/sheet-sync/standalone-script-config";
 import { prisma } from "@/server/db";
 import { readSheetExportAppsScriptId } from "@/server/repositories/sheet-export-apps-script-id";
 import { sheetExportRepository } from "@/server/repositories/sheet-export.repository";
@@ -100,21 +97,9 @@ export async function installSheetExportTrigger(params: {
   const hasCode = await boundScriptHasInboxFlowCode(params.auth, scriptId);
   const mustPushScript = !repairOnly || !hasCode;
 
-  const publicUrlHealth = await ensureHealthyPublicAppUrl(params.requestOrigin);
-  const apiBaseUrl = publicUrlHealth.url;
-  if (mustPushScript && !publicUrlHealth.reachable) {
-    assertHealthyPublicAppUrl(publicUrlHealth);
-  }
-
   if (mustPushScript) {
-    const { key, hash, prefix } = await resolveSheetSyncApiKey({
-      auth: params.auth,
-      scriptId,
-      storedHash: row.apiKeyHash,
-    });
-    const scriptConfig = buildAppsScriptConfig({
-      apiBaseUrl,
-      apiKey: key,
+    const scriptConfig = await buildStandaloneAppsScriptConfig({
+      organizationId: params.organizationId,
       tableId: row.extractionTableId,
       sheetTitle: row.sheetTitle,
       triggerMinutes: sheetTriggerMinutes,
@@ -132,31 +117,8 @@ export async function installSheetExportTrigger(params: {
       }
       throw err;
     }
-
-    await sheetExportRepository.updateApiKey(
-      row.id,
-      params.organizationId,
-      hash,
-      prefix
-    );
   } else {
     await new Promise((r) => setTimeout(r, 2000));
-  }
-
-  let serverRowCount = 0;
-  if (mustPushScript) {
-    try {
-      // Skip Gmail pull during install — launch must stay under gateway time limits.
-      // Existing table rows still get written; keep-alive fills new mail later.
-      const pushed = await pushSheetExportDataFromServer({
-        organizationId: params.organizationId,
-        exportId: row.id,
-        skipPrepare: true,
-      });
-      serverRowCount = pushed.rowCount;
-    } catch (pushErr) {
-      console.warn("[install-trigger] server push:", pushErr);
-    }
   }
 
   await sheetExportRepository.updateAppsScriptId(
@@ -182,17 +144,11 @@ export async function installSheetExportTrigger(params: {
       scriptEditorUrl,
       reason: "ok",
       message:
-        `Auto-sync is on (${setup.triggerCount} timer, every ${sheetTriggerMinutes} min).` +
-        (serverRowCount > 0
-          ? ` ${serverRowCount} rows are in the sheet.`
-          : " Click Sync now if the sheet is empty."),
+        `Auto-sync is on (${setup.triggerCount} timer, every ${sheetTriggerMinutes} min). ` +
+        `Starred Gmail → Gemini AI → this sheet (runs in Google — InboxFlow server not required). ` +
+        `Open the sheet → InboxFlow → Sync now if empty.`,
     };
   }
-
-  const serverPushNote =
-    serverRowCount > 0
-      ? ` ${serverRowCount} rows were written from InboxFlow (server).`
-      : "";
 
   if (setup.reason === "gcp_project") {
     return {
@@ -203,7 +159,7 @@ export async function installSheetExportTrigger(params: {
       scriptEditorUrl,
       reason: "gcp_project",
       errorMessage: setup.errorMessage,
-      message: inboxflowGcpLinkStepsMessage(scriptId) + serverPushNote,
+      message: inboxflowGcpLinkStepsMessage(scriptId),
     };
   }
 
@@ -217,7 +173,7 @@ export async function installSheetExportTrigger(params: {
       reason: "authorization",
       errorMessage: setup.errorMessage,
       message:
-        `Open your sheet → InboxFlow → Enable auto-sync, then Sync status.${serverPushNote}` +
+        `Open your sheet → InboxFlow → Enable auto-sync, then Sync status.` +
         (setup.errorMessage ? ` (${setup.errorMessage})` : ""),
     };
   }
@@ -230,7 +186,7 @@ export async function installSheetExportTrigger(params: {
       spreadsheetUrl,
       scriptEditorUrl,
       reason: "sheet_menu",
-      message: inboxflowSheetTriggerFallbackMessage(scriptId) + serverPushNote,
+      message: inboxflowSheetTriggerFallbackMessage(scriptId),
     };
   }
 

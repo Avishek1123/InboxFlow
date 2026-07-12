@@ -323,18 +323,16 @@ export async function POST(request: Request) {
           await sheetExportRepository.delete(existing.id, organization.id);
         }
 
-        const { sheetSyncVia } = getSyncPipelineConfig();
         let apiBaseUrl = requestOrigin;
-        // Apps Script pull needs a public URL; server-push does not.
-        if (sheetSyncVia === "script") {
-          if (!hasReachablePublicAppUrl(requestOrigin)) {
-            await startDevTunnelIfEnabled();
-          }
+        if (!hasReachablePublicAppUrl(requestOrigin)) {
+          await startDevTunnelIfEnabled().catch(() => null);
+        }
+        try {
           const publicUrlHealth =
             await ensureHealthyPublicAppUrl(requestOrigin);
-          apiBaseUrl = publicUrlHealth.reachable
-            ? publicUrlHealth.url
-            : requestOrigin;
+          if (publicUrlHealth.reachable) apiBaseUrl = publicUrlHealth.url;
+        } catch {
+          /* not required for standalone script */
         }
 
         const { key, hash, prefix } = generateSheetSyncApiKey();
@@ -373,72 +371,45 @@ export async function POST(request: Request) {
         };
       }
 
-      const { sheetSyncVia } = getSyncPipelineConfig();
-      let autoSyncOn = false;
-
-      if (sheetSyncVia === "server") {
-        // Preferred path: InboxFlow pushes via Sheets API. Keep-alive handles the interval.
-        autoSyncOn = true;
+      // Install Apps Script timer: starred Gmail → Gemini → sheet (in Google's cloud).
+      try {
+        const { account } = await getGoogleAuthClientForOrganization(
+          organization.id
+        );
+        const auth = await ensureSheetsOAuthClient(account);
+        const installed = await installSheetExportTrigger({
+          auth,
+          organizationId: organization.id,
+          exportId,
+          requestOrigin,
+          repairOnly: false,
+          triggerMinutes: syncMinutes,
+        });
         if (sheet) {
-          sheet.autoSyncOn = true;
-          sheet.needsGooglePermissions = false;
-          sheet.setupNote =
-            sheet.setupNote ??
-            `InboxFlow updates this sheet every ${syncMinutes} min (Gmail → AI → Sheets). Keep npm run dev running.`;
-        }
-        try {
-          const { pushSheetExportDataFromServer } = await import(
-            "@/server/google-sheets/push-sheet-export-data"
-          );
-          await pushSheetExportDataFromServer({
-            organizationId: organization.id,
-            exportId,
-          });
-        } catch (pushErr) {
-          console.warn("[studio/launch] server sheet push:", pushErr);
-        }
-      } else {
-        // Legacy: Auto-wire Apps Script timer.
-        try {
-          const { account } = await getGoogleAuthClientForOrganization(
-            organization.id
-          );
-          const auth = await ensureSheetsOAuthClient(account);
-          const installed = await installSheetExportTrigger({
-            auth,
-            organizationId: organization.id,
-            exportId,
-            requestOrigin,
-            repairOnly: false,
-            triggerMinutes: syncMinutes,
-          });
-          autoSyncOn = installed.triggerInstalled;
-          if (sheet) {
-            sheet.autoSyncOn = autoSyncOn;
-            sheet.setupNote = installed.message;
-            if (!autoSyncOn && installed.reason === "authorization") {
-              sheet.needsGooglePermissions = true;
-              sheet.reconnectUrl = buildGmailReconnectUrl(requestOrigin, {
-                popup: true,
-                sheetExportId: exportId,
-              });
-            } else {
-              sheet.needsGooglePermissions = false;
-            }
-          }
-        } catch (syncErr) {
-          console.warn("[studio/launch] auto-sync wire:", syncErr);
-          if (sheet) {
+          sheet.autoSyncOn = installed.triggerInstalled;
+          sheet.setupNote = installed.message;
+          if (!installed.triggerInstalled && installed.reason === "authorization") {
             sheet.needsGooglePermissions = true;
             sheet.reconnectUrl = buildGmailReconnectUrl(requestOrigin, {
               popup: true,
               sheetExportId: exportId,
             });
-            sheet.setupNote =
-              syncErr instanceof Error
-                ? syncErr.message
-                : "One Google approval is needed to finish auto-sync.";
+          } else {
+            sheet.needsGooglePermissions = false;
           }
+        }
+      } catch (syncErr) {
+        console.warn("[studio/launch] auto-sync wire:", syncErr);
+        if (sheet) {
+          sheet.needsGooglePermissions = true;
+          sheet.reconnectUrl = buildGmailReconnectUrl(requestOrigin, {
+            popup: true,
+            sheetExportId: exportId,
+          });
+          sheet.setupNote =
+            syncErr instanceof Error
+              ? syncErr.message
+              : "Open the sheet → InboxFlow → Enable auto-sync to authorize Gmail + AI.";
         }
       }
 
