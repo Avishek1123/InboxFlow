@@ -173,7 +173,7 @@ export async function installSheetExportTrigger(params: {
       reason: "authorization",
       errorMessage: setup.errorMessage,
       message:
-        `Open your sheet → InboxFlow → Enable auto-sync, then Sync status.` +
+        `Open InboxFlow → Finish Google approval (one popup). No sheet menu needed.` +
         (setup.errorMessage ? ` (${setup.errorMessage})` : ""),
     };
   }

@@ -220,10 +220,13 @@ export function CreateStudio() {
     setBuildStage("ready");
     setPhase("ready");
 
-    if (data.sheet?.needsGooglePermissions && data.sheet.reconnectUrl) {
+    // End-to-end: finish auto-sync in-app (never require sheet menu).
+    if (data.sheet && !data.sheet.autoSyncOn) {
       setSheetPermission({
         exportId: data.sheet.id,
-        reconnectUrl: data.sheet.reconnectUrl,
+        reconnectUrl:
+          data.sheet.reconnectUrl ||
+          `/api/v1/integrations/gmail/connect?reconnect=1&popup=1&sheetExportId=${data.sheet.id}`,
       });
     }
   }, []);
@@ -512,13 +515,13 @@ export function CreateStudio() {
                 </a>
                 <p className="mt-2 text-[11px] text-muted-foreground">
                   {ready.sheet.autoSyncOn
-                    ? `Every ${ready.sheet.syncMinutes ?? syncIntervalMinutes} min, Apps Script in your sheet reads starred Gmail, structures fields with Gemini, and writes rows — InboxFlow server is not required for the timer.`
+                    ? `Live: every ${ready.sheet.syncMinutes ?? syncIntervalMinutes} min the sheet timer reads starred Gmail, structures with AI, and writes rows. You don’t need to open the sheet or keep InboxFlow running.`
                     : asksForAutoUpdate
-                      ? `Open the sheet → InboxFlow → Enable auto-sync (authorize Gmail + script). Then it runs every ${ready.sheet.syncMinutes ?? syncIntervalMinutes} min on its own.`
+                      ? `Almost live — finish the Google approval popup so auto-sync turns on (every ${ready.sheet.syncMinutes ?? syncIntervalMinutes} min). No sheet menu needed.`
                       : "Your sheet is ready. Mention auto-update in a new prompt if you want a refresh schedule."}
                   {ready.sheet.setupNote ? ` ${ready.sheet.setupNote}` : ""}
                 </p>
-                {ready.sheet.needsGooglePermissions && (
+                {ready.sheet.needsGooglePermissions && !sheetPermission && (
                   <button
                     type="button"
                     onClick={() =>
@@ -531,7 +534,7 @@ export function CreateStudio() {
                     }
                     className="mt-3 rounded-lg bg-[#0F9D58] px-3 py-2 text-xs font-semibold text-white hover:opacity-90"
                   >
-                    Finish auto-sync permission
+                    Finish Google approval
                   </button>
                 )}
               </div>

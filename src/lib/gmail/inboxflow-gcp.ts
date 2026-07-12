@@ -41,11 +41,9 @@ export function inboxflowAppsScriptProjectSettingsUrl(scriptId: string): string 
 
 export function inboxflowGcpLinkStepsMessage(scriptId: string): string {
   return [
-    `1. Open Apps Script settings: ${inboxflowAppsScriptProjectSettingsUrl(scriptId)}`,
-    `2. Under Google Cloud Platform (GCP) Project → Change project → enter ${INBOXFLOW_GCP_PROJECT_NUMBER} → Set project.`,
-    `3. Confirm the page shows project inboxflow-497809 (or number ${INBOXFLOW_GCP_PROJECT_NUMBER}).`,
-    `4. Wait 1 minute, then click Install sheet trigger on this page again.`,
-    `Shortcut (no GCP step): open the sheet → InboxFlow → Enable auto-sync.`,
+    `Google still needs the script linked once.`,
+    `InboxFlow will prompt for Google approval in the app — you do not need to use the sheet menu.`,
+    `If it keeps failing, open ${inboxflowAppsScriptProjectSettingsUrl(scriptId)} → GCP Project → set ${INBOXFLOW_GCP_PROJECT_NUMBER}, then click Finish Google approval again in InboxFlow.`,
   ].join(" ");
 }
 

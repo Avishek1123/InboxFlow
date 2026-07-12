@@ -332,16 +332,9 @@ function recordSyncSuccess_(stats) {
 }
 
 function setupInboxFlowAutomationFromApi() {
+  // Install the timer only — first sync runs on the next tick / Sync now.
+  // Avoids failing setup when Gemini/Gmail scopes are still warming up.
   installInboxFlowTimeTrigger_();
-  try {
-    var stats = runStandaloneSync_();
-    recordSyncSuccess_(stats);
-  } catch (e) {
-    PropertiesService.getDocumentProperties().setProperty(
-      'INBOXFLOW_LAST_ERROR',
-      e.message
-    );
-  }
   return inboxFlowTriggerCount_();
 }
 

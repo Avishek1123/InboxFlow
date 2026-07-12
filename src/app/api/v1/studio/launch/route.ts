@@ -388,7 +388,8 @@ export async function POST(request: Request) {
         if (sheet) {
           sheet.autoSyncOn = installed.triggerInstalled;
           sheet.setupNote = installed.message;
-          if (!installed.triggerInstalled && installed.reason === "authorization") {
+          // Always offer in-app finish when timer isn't on yet (no sheet menu).
+          if (!installed.triggerInstalled) {
             sheet.needsGooglePermissions = true;
             sheet.reconnectUrl = buildGmailReconnectUrl(requestOrigin, {
               popup: true,
@@ -401,6 +402,7 @@ export async function POST(request: Request) {
       } catch (syncErr) {
         console.warn("[studio/launch] auto-sync wire:", syncErr);
         if (sheet) {
+          sheet.autoSyncOn = false;
           sheet.needsGooglePermissions = true;
           sheet.reconnectUrl = buildGmailReconnectUrl(requestOrigin, {
             popup: true,
@@ -409,7 +411,7 @@ export async function POST(request: Request) {
           sheet.setupNote =
             syncErr instanceof Error
               ? syncErr.message
-              : "Open the sheet → InboxFlow → Enable auto-sync to authorize Gmail + AI.";
+              : "One Google approval in InboxFlow finishes auto-sync.";
         }
       }
 

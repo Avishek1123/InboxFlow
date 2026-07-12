@@ -6,58 +6,69 @@ import { sheetExportClient } from "@/services/sheet-export-client";
 type Props = {
   exportId: string;
   reconnectUrl: string;
+  /** Auto-start Google OAuth + install (end-to-end, no sheet menu). */
+  autoStart?: boolean;
   onDone: (message: string) => void;
   onCancel: () => void;
 };
 
 /**
- * Modal that appears when auto-sync still needs Google consent and a public API URL
- * in the sheet's Apps Script (fixes localhost DNS errors).
+ * Finishes product auto-sync inside InboxFlow — user never opens the sheet menu.
+ * Flow: Google OAuth popup → install Apps Script timer via API.
  */
 export function SheetPermissionModal({
   exportId,
   reconnectUrl,
+  autoStart = true,
   onDone,
   onCancel,
 }: Props) {
   const [busy, setBusy] = useState(false);
-  const [status, setStatus] = useState<string | null>(null);
+  const [status, setStatus] = useState<string | null>(
+    "Finishing your product — connecting Google…"
+  );
 
   const finishTrigger = useCallback(async () => {
     setBusy(true);
-    setStatus("Updating sheet script + installing auto-sync timer…");
+    setStatus("Installing 1-minute auto-sync on your sheet…");
     try {
-      // repairOnly:false → push public HTTPS URL into Apps Script (replaces localhost).
       const first = await sheetExportClient.installTrigger(exportId, {
         repairOnly: false,
       });
       if (first.triggerInstalled) {
-        onDone(first.message || "Auto-sync is on. Your sheet can sync from Google.");
+        onDone(
+          first.message ||
+            "Auto-sync is on. Starred emails will update your sheet every minute."
+        );
         return;
       }
 
-      await new Promise((r) => setTimeout(r, 3000));
-      for (let i = 0; i < 2; i++) {
+      await new Promise((r) => setTimeout(r, 2500));
+      for (let i = 0; i < 4; i++) {
+        setStatus(`Almost done — retrying auto-sync install (${i + 1}/4)…`);
         const res = await sheetExportClient.installTrigger(exportId, {
           repairOnly: true,
         });
         if (res.triggerInstalled) {
-          onDone(res.message || "Auto-sync enabled.");
+          onDone(
+            res.message ||
+              "Auto-sync enabled. Your product will update the sheet on its own."
+          );
           return;
         }
-        if (i === 0) await new Promise((r) => setTimeout(r, 8000));
+        await new Promise((r) => setTimeout(r, 4000));
       }
 
-      if (first.reason === "authorization") {
+      if (first.reason === "authorization" || first.reason === "gcp_project") {
         setStatus(
-          "Google still needs one more approval. Click Grant Google permissions, allow all scopes, then Check again."
+          "Google needs one more approval. Click Continue with Google, allow all checkboxes, then we’ll finish automatically."
         );
         return;
       }
 
       onDone(
         first.message ||
-          "Script updated. If the timer is not on yet, click Grant Google permissions once more."
+          "Setup saved. Click Continue with Google once more if the timer is not on yet."
       );
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Setup failed");
@@ -65,26 +76,6 @@ export function SheetPermissionModal({
       setBusy(false);
     }
   }, [exportId, onDone]);
-
-  useEffect(() => {
-    const t = window.setTimeout(() => openGooglePermissions(), 400);
-    return () => window.clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- open once on mount
-  }, []);
-
-  useEffect(() => {
-    function onMessage(event: MessageEvent) {
-      const data = event.data as { type?: string; ok?: boolean; message?: string };
-      if (data?.type !== "inboxflow-gmail-oauth") return;
-      if (data.ok) {
-        void finishTrigger();
-      } else {
-        setStatus(data.message ?? "Google permissions were not granted.");
-      }
-    }
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, [finishTrigger]);
 
   function openGooglePermissions() {
     setStatus(null);
@@ -101,9 +92,30 @@ export function SheetPermissionModal({
       `width=${w},height=${h},left=${left},top=${top}`
     );
     setStatus(
-      "In the Google popup: check all boxes, then Continue. We will enable auto-sync and fix the sheet API URL automatically."
+      "In the Google popup: check every permission box, then Continue. We’ll turn on auto-sync automatically — you don’t need to open the sheet."
     );
   }
+
+  useEffect(() => {
+    if (!autoStart) return;
+    const t = window.setTimeout(() => openGooglePermissions(), 350);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- open once on mount
+  }, [autoStart]);
+
+  useEffect(() => {
+    function onMessage(event: MessageEvent) {
+      const data = event.data as { type?: string; ok?: boolean; message?: string };
+      if (data?.type !== "inboxflow-gmail-oauth") return;
+      if (data.ok) {
+        void finishTrigger();
+      } else {
+        setStatus(data.message ?? "Google permissions were not granted.");
+      }
+    }
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [finishTrigger]);
 
   return (
     <div
@@ -113,12 +125,11 @@ export function SheetPermissionModal({
     >
       <div className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-xl">
         <h2 id="sheet-permission-title" className="text-lg font-semibold">
-          Enable auto-sync
+          Finishing your product
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Grant Google permission once so InboxFlow can install the sheet timer and
-          replace any <code className="text-xs">localhost</code> URL (which causes DNS
-          errors when syncing from the sheet).
+          One Google approval turns on the 1-minute sheet timer (starred Gmail → AI →
+          your sheet). No need to open the spreadsheet or click any sheet menu.
         </p>
         {status && (
           <p className="mt-3 rounded-lg bg-muted/60 px-3 py-2 text-sm">{status}</p>
@@ -130,7 +141,7 @@ export function SheetPermissionModal({
             disabled={busy}
             className="rounded-lg bg-[#0F9D58] px-4 py-2.5 text-sm font-semibold text-white hover:opacity-90 disabled:opacity-50"
           >
-            Grant Google permissions
+            Continue with Google
           </button>
           <button
             type="button"
@@ -138,14 +149,14 @@ export function SheetPermissionModal({
             disabled={busy}
             className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
           >
-            {busy ? "Working…" : "Enable auto-sync now"}
+            {busy ? "Installing…" : "Retry install"}
           </button>
           <button
             type="button"
             onClick={onCancel}
             className="text-sm text-muted-foreground underline hover:text-foreground"
           >
-            Cancel
+            Later
           </button>
         </div>
       </div>
