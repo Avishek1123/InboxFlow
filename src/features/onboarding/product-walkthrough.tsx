@@ -10,7 +10,7 @@ import {
   hasCompletedProductWalkthrough,
   markProductWalkthroughComplete,
 } from "@/lib/onboarding/product-walkthrough";
-
+//step
 type StepId =
   | "welcome"
   | "ask"
