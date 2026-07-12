@@ -6,11 +6,11 @@ import { FirebaseSetupNotice } from "@/components/auth/firebase-setup-notice";
 export const metadata = { title: "Sign in" };
 
 type Props = {
-  searchParams: Promise<{ redirect?: string }>;
+  searchParams: Promise<{ redirect?: string; error?: string }>;
 };
 
 export default async function SignInPage({ searchParams }: Props) {
-  const { redirect } = await searchParams;
+  const { redirect, error } = await searchParams;
 
   return (
     <div className="space-y-4">
@@ -20,6 +20,12 @@ export default async function SignInPage({ searchParams }: Props) {
           Email, Google, or Indian phone (+91)
         </p>
       </div>
+      {error === "workspace" && (
+        <p className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+          Could not load your workspace. Sign in again after the latest deploy
+          finishes (database migration may still be applying).
+        </p>
+      )}
       {isFirebaseConfigured() ? (
         <AuthForm mode="sign-in" redirectTo={redirect ?? "/create"} />
       ) : (

@@ -16,6 +16,16 @@ export async function createSessionCookie(idToken: string) {
     await syncUserToDatabase(decoded);
   } catch (err) {
     console.error("[auth] DB sync failed:", err);
+    return NextResponse.json(
+      {
+        error: {
+          code: "DB_SYNC_FAILED",
+          message:
+            "Signed in, but could not create your workspace. Check DATABASE_URL / migrations.",
+        },
+      },
+      { status: 500 }
+    );
   }
 
   const response = NextResponse.json({ ok: true });

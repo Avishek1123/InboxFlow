@@ -309,7 +309,7 @@ function AiCore({ reduced }: { reduced: boolean }) {
       </svg>
 
       <motion.div
-        className="relative z-10 flex h-[42%] w-[42%] items-center justify-center rounded-full border border-zinc-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 shadow-[0_0_40px_rgba(99,102,241,0.18),0_10px_28px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:border-white/20 dark:from-white/15 dark:via-violet-500/20 dark:to-blue-600/30 dark:shadow-[0_0_60px_rgba(124,58,237,0.45)]"
+        className="relative z-30 flex h-[42%] w-[42%] items-center justify-center rounded-full border border-zinc-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 shadow-[0_0_40px_rgba(99,102,241,0.18),0_10px_28px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:border-white/20 dark:from-white/15 dark:via-violet-500/20 dark:to-blue-600/30 dark:shadow-[0_0_60px_rgba(124,58,237,0.45)]"
         animate={
           reduced
             ? undefined
@@ -351,61 +351,58 @@ function AiCore({ reduced }: { reduced: boolean }) {
 function StreamLines({ reduced }: { reduced: boolean }) {
   if (reduced) {
     return (
-      <div className="pointer-events-none absolute inset-x-[18%] top-1/2 hidden h-px -translate-y-1/2 bg-gradient-to-r from-transparent via-violet-400/40 to-transparent lg:block" />
+      <div className="pointer-events-none absolute left-1/2 top-1/2 z-[15] hidden h-px w-[36rem] -translate-x-1/2 -translate-y-1/2 bg-gradient-to-r from-transparent via-violet-400/40 to-transparent lg:block" />
     );
   }
 
+  // Short spans: chaos edge → hub → workspace edge
+  const hubX = 400;
+  const hubY = 200;
+  const wires = [
+    {
+      d: `M40 60 C160 80, 300 190, ${hubX} ${hubY} C500 210, 640 70, 760 50`,
+      stroke: "stroke-violet-600/60 dark:stroke-violet-400/50",
+      fill: "fill-violet-600 dark:fill-violet-200",
+    },
+    {
+      d: `M30 140 C170 150, 310 195, ${hubX} ${hubY} C490 205, 650 150, 770 140`,
+      stroke: "stroke-violet-500/55 dark:stroke-sky-400/45",
+      fill: "fill-sky-500 dark:fill-sky-300",
+    },
+    {
+      d: `M30 260 C170 250, 310 205, ${hubX} ${hubY} C490 195, 650 250, 770 260`,
+      stroke: "stroke-sky-600/60 dark:stroke-sky-400/50",
+      fill: "fill-sky-600 dark:fill-sky-300",
+    },
+    {
+      d: `M40 340 C160 320, 300 210, ${hubX} ${hubY} C500 190, 640 330, 760 350`,
+      stroke: "stroke-sky-600/55 dark:stroke-violet-400/45",
+      fill: "fill-violet-600 dark:fill-violet-200",
+    },
+  ];
+
   return (
     <svg
-      className="pointer-events-none absolute inset-0 hidden h-full w-full lg:block"
-      viewBox="0 0 1200 700"
+      className="pointer-events-none absolute left-1/2 top-1/2 z-[15] hidden h-[26rem] w-[42rem] -translate-x-1/2 -translate-y-1/2 lg:block xl:w-[48rem]"
+      viewBox="0 0 800 400"
+      preserveAspectRatio="xMidYMid meet"
       fill="none"
       aria-hidden
     >
-      {[
-        "M140 160 C320 180, 420 300, 600 350",
-        "M120 280 C300 300, 430 340, 600 350",
-        "M130 420 C310 400, 440 360, 600 350",
-        "M150 540 C330 500, 450 380, 600 350",
-      ].map((d, i) => (
-        <g key={d}>
+      {wires.map((wire, i) => (
+        <g key={wire.d}>
           <path
-            d={d}
-            className="stroke-violet-600/55 dark:stroke-violet-400/40"
-            strokeWidth="1.5"
+            d={wire.d}
+            className={wire.stroke}
+            strokeWidth="1.6"
             strokeDasharray="4 8"
+            strokeLinecap="round"
           />
-          <motion.circle
-            r="3"
-            className="fill-violet-600 dark:fill-violet-200"
-          >
+          <motion.circle r="3" className={wire.fill}>
             <animateMotion
-              dur={`${2.6 + i * 0.25}s`}
+              dur={`${2.8 + i * 0.2}s`}
               repeatCount="indefinite"
-              path={d}
-            />
-          </motion.circle>
-        </g>
-      ))}
-      {[
-        "M600 350 C760 320, 880 220, 1040 180",
-        "M600 350 C760 340, 880 300, 1040 290",
-        "M600 350 C760 360, 880 400, 1040 400",
-        "M600 350 C760 390, 880 500, 1040 540",
-      ].map((d, i) => (
-        <g key={d}>
-          <path
-            d={d}
-            className="stroke-sky-600/55 dark:stroke-sky-400/40"
-            strokeWidth="1.5"
-            strokeDasharray="4 8"
-          />
-          <motion.circle r="3" className="fill-sky-600 dark:fill-sky-300">
-            <animateMotion
-              dur={`${2.4 + i * 0.2}s`}
-              begin="0.4s"
-              repeatCount="indefinite"
-              path={d}
+              path={wire.d}
             />
           </motion.circle>
         </g>
@@ -516,11 +513,9 @@ export function Hero() {
         </div>
 
         <div className="relative mt-6 flex min-h-0 flex-1 flex-col items-stretch lg:mt-2 lg:items-center">
-          <StreamLines reduced={reduced} />
-
           <div className="grid w-full grid-cols-1 items-center gap-8 lg:grid-cols-[1fr_auto_1fr] lg:gap-4">
             {/* Chaos — desktop story column */}
-            <div className="relative mx-auto hidden h-[360px] w-full max-w-md lg:mx-0 lg:block">
+            <div className="relative z-20 mx-auto hidden h-[360px] w-full max-w-md lg:mx-0 lg:block">
               <p className="mb-2 text-left text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-500 dark:text-muted-foreground">
                 Chaos
               </p>
@@ -559,12 +554,15 @@ export function Hero() {
             </div>
 
             {/* AI Core — always visible, compact on mobile */}
-            <div className="relative z-10 order-first flex flex-col items-center lg:order-none">
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-600 dark:text-violet-300/70">
+            <div className="relative order-first flex flex-col items-center lg:order-none">
+              <p className="relative z-30 mb-2 text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-600 dark:text-violet-300/70">
                 AI Core
               </p>
-              <AiCore reduced={reduced} />
-              <p className="mt-2 text-[10px] font-medium uppercase tracking-[0.22em] text-zinc-500 sm:mt-3 dark:text-muted-foreground">
+              <div className="relative flex items-center justify-center">
+                <StreamLines reduced={reduced} />
+                <AiCore reduced={reduced} />
+              </div>
+              <p className="relative z-30 mt-2 text-[10px] font-medium uppercase tracking-[0.22em] text-zinc-500 sm:mt-3 dark:text-muted-foreground">
                 Extract · Structure · Route
               </p>
 
@@ -584,7 +582,7 @@ export function Hero() {
               </div>
             </div>
 
-            <div className="relative mx-auto w-full max-w-md lg:mx-0">
+            <div className="relative z-20 mx-auto w-full max-w-md lg:mx-0">
               <p className="mb-2 text-center text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-600 dark:text-muted-foreground lg:mb-3 lg:text-right">
                 Organized workspace
               </p>

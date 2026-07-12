@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import type { Organization, OrganizationMember, User } from "@prisma/client";
 import { prisma } from "@/server/db";
 import { requireServerSession } from "@/lib/firebase/server-auth";
+import { syncUserToDatabase } from "@/lib/firebase/session";
 import { ensureOrganizationForUser } from "./ensure-organization";
 
 function isNextRedirect(err: unknown): boolean {
@@ -24,7 +25,6 @@ export async function requireOrganization(): Promise<OrganizationContext> {
   const session = await requireServerSession();
 
   try {
-    // One query covers the common path (user already has a workspace).
     const existing = await prisma.organizationMember.findFirst({
       where: { user: { firebaseUid: session.uid } },
       include: { user: true, organization: true },
@@ -39,7 +39,6 @@ export async function requireOrganization(): Promise<OrganizationContext> {
       };
     }
 
-    // Fallback: email match or first-time workspace create.
     let user = await prisma.user.findUnique({
       where: { firebaseUid: session.uid },
     });
@@ -50,7 +49,10 @@ export async function requireOrganization(): Promise<OrganizationContext> {
       });
     }
 
-    if (!user) redirect("/sign-in");
+    // Session cookie can exist even if DB sync failed during sign-in — repair it.
+    if (!user) {
+      user = await syncUserToDatabase(session);
+    }
 
     const organization = await ensureOrganizationForUser(user);
 
