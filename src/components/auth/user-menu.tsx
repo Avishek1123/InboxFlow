@@ -40,7 +40,7 @@ export function UserMenu() {
           router.push("/");
           router.refresh();
         }}
-        className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 hover:bg-zinc-50 dark:border-border dark:bg-transparent dark:text-foreground dark:hover:bg-muted"
+        className="rounded-md border border-zinc-300 bg-white px-2 py-1.5 text-xs text-zinc-900 hover:bg-zinc-50 sm:px-3 sm:text-sm dark:border-border dark:bg-transparent dark:text-foreground dark:hover:bg-muted"
       >
         Sign out
       </button>

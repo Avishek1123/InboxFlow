@@ -423,7 +423,7 @@ export function Hero() {
   const [hoveredOut, setHoveredOut] = useState<string | null>(null);
 
   return (
-    <section className="relative isolate h-full max-h-dvh overflow-hidden bg-background text-foreground">
+    <section className="relative isolate min-h-dvh overflow-x-hidden bg-background text-foreground lg:h-full lg:max-h-dvh lg:overflow-hidden">
       {/* Light canvas only */}
       <div
         className="absolute inset-0 dark:hidden"
@@ -467,13 +467,13 @@ export function Hero() {
       />
       <ParticleField reduced={reduced} />
 
-      <div className="relative z-10 mx-auto flex h-full max-w-7xl flex-col px-4 pb-4 pt-16 sm:px-6 lg:px-8">
-        <div className="relative z-20 mx-auto max-w-3xl shrink-0 pt-2 text-center lg:pt-4">
+      <div className="relative z-10 mx-auto flex min-h-dvh max-w-7xl flex-col px-4 pb-8 pt-16 sm:px-6 sm:pb-6 lg:h-full lg:min-h-0 lg:px-8 lg:pb-4">
+        <div className="relative z-20 mx-auto w-full max-w-3xl shrink-0 pt-2 text-center lg:pt-4">
           <motion.p
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="font-[family-name:var(--font-marketing-display)] text-sm font-semibold tracking-[0.28em] text-zinc-500 dark:text-violet-300/80"
+            className="font-[family-name:var(--font-marketing-display)] text-xs font-semibold tracking-[0.28em] text-zinc-500 sm:text-sm dark:text-violet-300/80"
           >
             INBOXFLOW AI
           </motion.p>
@@ -481,7 +481,7 @@ export function Hero() {
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.08 }}
-            className="mt-3 font-[family-name:var(--font-marketing-display)] text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-5xl"
+            className="mt-3 font-[family-name:var(--font-marketing-display)] text-[1.75rem] font-semibold leading-tight tracking-tight text-foreground sm:text-4xl lg:text-5xl"
           >
             Turn Conversations Into Structured Work
           </motion.h1>
@@ -489,7 +489,7 @@ export function Hero() {
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.16 }}
-            className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-zinc-600 dark:text-muted-foreground sm:text-base"
+            className="mx-auto mt-3 max-w-xl text-sm leading-relaxed text-zinc-600 sm:max-w-2xl sm:text-base dark:text-muted-foreground"
           >
             Connect Gmail and WhatsApp. InboxFlow AI automatically extracts data,
             creates records, assigns tasks, and powers your workflows.
@@ -498,32 +498,33 @@ export function Hero() {
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.65, delay: 0.24 }}
-            className="mt-5 flex flex-wrap items-center justify-center gap-3"
+            className="mt-5 flex flex-wrap items-center justify-center gap-2.5 sm:gap-3"
           >
             <a
               href="/sign-up"
-              className="rounded-full bg-foreground px-7 py-3 text-sm font-semibold text-background transition hover:opacity-90"
+              className="rounded-full bg-foreground px-6 py-2.5 text-sm font-semibold text-background transition hover:opacity-90 sm:px-7 sm:py-3"
             >
               Start Free
             </a>
             <a
               href="/create"
-              className="rounded-full border border-zinc-300 bg-white px-7 py-3 text-sm font-medium text-zinc-900 shadow-sm transition hover:bg-zinc-50 dark:border-border dark:bg-background/60 dark:text-foreground dark:shadow-none dark:hover:bg-muted"
+              className="rounded-full border border-zinc-300 bg-white px-6 py-2.5 text-sm font-medium text-zinc-900 shadow-sm transition hover:bg-zinc-50 sm:px-7 sm:py-3 dark:border-border dark:bg-background/60 dark:text-foreground dark:shadow-none dark:hover:bg-muted"
             >
               Watch Demo
             </a>
           </motion.div>
         </div>
 
-        <div className="relative mt-4 flex min-h-0 flex-1 items-center lg:mt-2">
+        <div className="relative mt-6 flex min-h-0 flex-1 flex-col items-stretch lg:mt-2 lg:items-center">
           <StreamLines reduced={reduced} />
 
-          <div className="grid w-full grid-cols-1 items-center gap-6 lg:grid-cols-[1fr_auto_1fr] lg:gap-4">
-            <div className="relative mx-auto h-[240px] w-full max-w-md lg:mx-0 lg:h-[360px]">
-              <p className="mb-2 text-center text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-500 dark:text-muted-foreground lg:text-left">
+          <div className="grid w-full grid-cols-1 items-center gap-8 lg:grid-cols-[1fr_auto_1fr] lg:gap-4">
+            {/* Chaos — desktop story column */}
+            <div className="relative mx-auto hidden h-[360px] w-full max-w-md lg:mx-0 lg:block">
+              <p className="mb-2 text-left text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-500 dark:text-muted-foreground">
                 Chaos
               </p>
-              <div className="relative h-[210px] lg:h-[330px]">
+              <div className="relative h-[330px]">
                 {CHAOS.map((item) => (
                   <article
                     key={item.id}
@@ -557,18 +558,34 @@ export function Hero() {
               </div>
             </div>
 
-            <div className="relative z-10 flex flex-col items-center">
+            {/* AI Core — always visible, compact on mobile */}
+            <div className="relative z-10 order-first flex flex-col items-center lg:order-none">
               <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-600 dark:text-violet-300/70">
                 AI Core
               </p>
               <AiCore reduced={reduced} />
-              <p className="mt-3 text-[10px] font-medium uppercase tracking-[0.22em] text-zinc-500 dark:text-muted-foreground">
+              <p className="mt-2 text-[10px] font-medium uppercase tracking-[0.22em] text-zinc-500 sm:mt-3 dark:text-muted-foreground">
                 Extract · Structure · Route
               </p>
+
+              {/* Mobile-only compact chaos strip */}
+              <div className="mt-5 flex w-full max-w-sm flex-wrap justify-center gap-2 lg:hidden">
+                {CHAOS.slice(0, 3).map((item) => (
+                  <div
+                    key={item.id}
+                    className="flex max-w-[46%] items-center gap-1.5 rounded-xl border border-zinc-200/90 bg-white/90 px-2.5 py-2 shadow-sm dark:border-white/10 dark:bg-white/[0.06]"
+                  >
+                    <ChannelBadge channel={item.channel} />
+                    <p className="truncate text-[11px] font-semibold text-zinc-900 dark:text-foreground/90">
+                      {item.title}
+                    </p>
+                  </div>
+                ))}
+              </div>
             </div>
 
             <div className="relative mx-auto w-full max-w-md lg:mx-0">
-              <p className="mb-3 text-center text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-600 dark:text-muted-foreground lg:text-right">
+              <p className="mb-2 text-center text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-600 dark:text-muted-foreground lg:mb-3 lg:text-right">
                 Organized workspace
               </p>
               <div className="flex flex-col gap-2">
@@ -583,12 +600,13 @@ export function Hero() {
                       onHoverStart={() => setHoveredOut(card.id)}
                       onHoverEnd={() => setHoveredOut(null)}
                       className={cn(
-                        "rounded-2xl border bg-gradient-to-r p-3 shadow-[0_10px_28px_rgba(15,23,42,0.07)] backdrop-blur-md transition-transform dark:shadow-[0_16px_40px_rgba(0,0,0,0.3)]",
+                        "rounded-2xl border bg-gradient-to-r p-2.5 shadow-[0_10px_28px_rgba(15,23,42,0.07)] backdrop-blur-md transition-transform sm:p-3 dark:shadow-[0_16px_40px_rgba(0,0,0,0.3)]",
                         card.accent,
-                        hoveredOut === card.id && "scale-[1.02]"
+                        hoveredOut === card.id && "scale-[1.02]",
+                        i >= 3 && "hidden sm:block"
                       )}
                     >
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-2.5 sm:gap-3">
                         <OutputGlyph kind={card.kind} className={card.glyph} />
                         <div className="min-w-0 flex-1">
                           <p className="truncate text-sm font-semibold text-zinc-900 dark:text-foreground">
@@ -598,13 +616,13 @@ export function Hero() {
                             {card.meta}
                           </p>
                         </div>
-                        <span className="rounded-full border border-zinc-300/90 bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-zinc-700 shadow-sm dark:border-transparent dark:bg-white/10 dark:font-semibold dark:text-white/50 dark:shadow-none">
+                        <span className="shrink-0 rounded-full border border-zinc-300/90 bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-zinc-700 shadow-sm dark:border-transparent dark:bg-white/10 dark:font-semibold dark:text-white/50 dark:shadow-none">
                           Auto
                         </span>
                       </div>
                       {!reduced && (
                         <motion.div
-                          className="mt-2.5 h-1 overflow-hidden rounded-full bg-zinc-200/90 dark:bg-white/10"
+                          className="mt-2 h-1 overflow-hidden rounded-full bg-zinc-200/90 dark:bg-white/10"
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           transition={{ delay: 1 + i * 0.1 }}
@@ -629,7 +647,7 @@ export function Hero() {
           </div>
         </div>
 
-        <p className="mt-2 shrink-0 text-center text-[10px] font-medium uppercase tracking-[0.3em] text-zinc-500 dark:text-muted-foreground/70">
+        <p className="mt-6 shrink-0 text-center text-[10px] font-medium uppercase tracking-[0.3em] text-zinc-500 lg:mt-2 dark:text-muted-foreground/70">
           Conversations in · Structured work out
         </p>
       </div>

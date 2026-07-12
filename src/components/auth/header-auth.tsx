@@ -19,12 +19,12 @@ export function HeaderAuth() {
 
   if (user) {
     return (
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-1.5 sm:gap-3">
         <Link
           href="/create"
           prefetch
           onMouseEnter={() => router.prefetch("/create")}
-          className="rounded-lg bg-foreground px-3.5 py-1.5 text-sm font-semibold text-background transition-opacity hover:opacity-90"
+          className="rounded-lg bg-foreground px-2.5 py-1.5 text-xs font-semibold text-background transition-opacity hover:opacity-90 sm:px-3.5 sm:text-sm"
         >
           Dashboard
         </Link>
