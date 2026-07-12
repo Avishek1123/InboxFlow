@@ -57,6 +57,68 @@ body {
   color: var(--foreground);
 }
 
+/* Circular theme wipe (View Transitions API) */
+html {
+  view-transition-name: root;
+}
+
+@supports (view-transition-name: none) {
+  ::view-transition-old(root),
+  ::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
+  }
+
+  ::view-transition-old(root) {
+    z-index: 1;
+  }
+
+  ::view-transition-new(root) {
+    z-index: 9999;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
+/* Hero chaos cards — continuous float (CSS so theme toggles never kill it) */
+@keyframes chaos-float {
+  0% {
+    transform: translate3d(0, 0, 0) rotate(var(--chaos-rot, 0deg));
+  }
+  20% {
+    transform: translate3d(10px, -14px, 0)
+      rotate(calc(var(--chaos-rot, 0deg) + 1.8deg));
+  }
+  40% {
+    transform: translate3d(18px, 6px, 0)
+      rotate(calc(var(--chaos-rot, 0deg) - 1.2deg));
+  }
+  60% {
+    transform: translate3d(6px, -18px, 0)
+      rotate(calc(var(--chaos-rot, 0deg) + 1deg));
+  }
+  80% {
+    transform: translate3d(14px, 4px, 0)
+      rotate(calc(var(--chaos-rot, 0deg) - 1.6deg));
+  }
+  100% {
+    transform: translate3d(0, 0, 0) rotate(var(--chaos-rot, 0deg));
+  }
+}
+
+.chaos-float {
+  animation: chaos-float var(--chaos-dur, 7s) ease-in-out var(--chaos-delay, 0s)
+    infinite;
+  will-change: transform;
+}
+
+
 /* Thin scrollbar — hidden until the scroll area is hovered */
 .scrollbar-subtle {
   scrollbar-gutter: stable;

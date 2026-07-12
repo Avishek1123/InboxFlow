@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import {
   AnimatePresence,
   motion,
@@ -16,7 +16,6 @@ type ChaosItem = {
   channel: "gmail" | "whatsapp" | "lead" | "support";
   title: string;
   preview: string;
-  x: number;
   y: number;
   rotate: number;
   delay: number;
@@ -28,6 +27,8 @@ type OutputCard = {
   title: string;
   meta: string;
   accent: string;
+  glyph: string;
+  bar: string;
 };
 
 const CHAOS: ChaosItem[] = [
@@ -36,7 +37,6 @@ const CHAOS: ChaosItem[] = [
     channel: "gmail",
     title: "Re: Q3 pricing",
     preview: "Can we schedule a call this week?",
-    x: -8,
     y: 6,
     rotate: -7,
     delay: 0,
@@ -46,7 +46,6 @@ const CHAOS: ChaosItem[] = [
     channel: "whatsapp",
     title: "WhatsApp · Maya",
     preview: "Interested in the Pro plan…",
-    x: 4,
     y: 28,
     rotate: 5,
     delay: 0.15,
@@ -56,7 +55,6 @@ const CHAOS: ChaosItem[] = [
     channel: "lead",
     title: "New inquiry",
     preview: "Demo request from Northwind",
-    x: -4,
     y: 52,
     rotate: -3,
     delay: 0.3,
@@ -66,7 +64,6 @@ const CHAOS: ChaosItem[] = [
     channel: "support",
     title: "Support ticket",
     preview: "Invoice #4821 — need help",
-    x: 6,
     y: 74,
     rotate: 8,
     delay: 0.45,
@@ -76,7 +73,6 @@ const CHAOS: ChaosItem[] = [
     channel: "gmail",
     title: "Intro · Series A",
     preview: "Connecting you with Jordan…",
-    x: -10,
     y: 38,
     rotate: -10,
     delay: 0.55,
@@ -89,53 +85,57 @@ const OUTPUTS: OutputCard[] = [
     kind: "lead",
     title: "Lead · Maya Chen",
     meta: "Northwind · Hot",
-    accent: "from-violet-500/30 to-fuchsia-500/10",
+    accent:
+      "border-violet-300/70 from-violet-500/40 via-fuchsia-400/15 to-white dark:border-white/10 dark:from-violet-500/30 dark:via-fuchsia-500/10 dark:to-transparent",
+    glyph:
+      "bg-violet-500/20 text-violet-700 ring-1 ring-violet-400/30 dark:bg-white/5 dark:text-white/70 dark:ring-0",
+    bar: "bg-violet-500 dark:bg-white/50",
   },
   {
     id: "o2",
     kind: "crm",
     title: "CRM · Acme Corp",
     meta: "Stage: Qualified",
-    accent: "from-sky-500/30 to-cyan-500/10",
+    accent:
+      "border-sky-300/70 from-sky-500/40 via-cyan-400/15 to-white dark:border-white/10 dark:from-sky-500/30 dark:via-cyan-500/10 dark:to-transparent",
+    glyph:
+      "bg-sky-500/20 text-sky-700 ring-1 ring-sky-400/30 dark:bg-white/5 dark:text-white/70 dark:ring-0",
+    bar: "bg-sky-500 dark:bg-white/50",
   },
   {
     id: "o3",
     kind: "task",
     title: "Task · Follow up",
     meta: "Due today · Sales",
-    accent: "from-amber-500/25 to-orange-500/10",
+    accent:
+      "border-amber-300/70 from-amber-500/35 via-orange-400/15 to-white dark:border-white/10 dark:from-amber-500/25 dark:via-orange-500/10 dark:to-transparent",
+    glyph:
+      "bg-amber-500/20 text-amber-800 ring-1 ring-amber-400/30 dark:bg-white/5 dark:text-white/70 dark:ring-0",
+    bar: "bg-amber-500 dark:bg-white/50",
   },
   {
     id: "o4",
     kind: "deal",
     title: "Deal · $48k",
     meta: "Pipeline · Negotiation",
-    accent: "from-emerald-500/25 to-teal-500/10",
+    accent:
+      "border-emerald-300/70 from-emerald-500/35 via-teal-400/15 to-white dark:border-white/10 dark:from-emerald-500/25 dark:via-teal-500/10 dark:to-transparent",
+    glyph:
+      "bg-emerald-500/20 text-emerald-700 ring-1 ring-emerald-400/30 dark:bg-white/5 dark:text-white/70 dark:ring-0",
+    bar: "bg-emerald-500 dark:bg-white/50",
   },
   {
     id: "o5",
     kind: "analytics",
     title: "Inbox → Work",
     meta: "12 converted · 94% auto",
-    accent: "from-indigo-500/30 to-blue-500/10",
+    accent:
+      "border-indigo-300/70 from-indigo-500/40 via-blue-400/15 to-white dark:border-white/10 dark:from-indigo-500/30 dark:via-blue-500/10 dark:to-transparent",
+    glyph:
+      "bg-indigo-500/20 text-indigo-700 ring-1 ring-indigo-400/30 dark:bg-white/5 dark:text-white/70 dark:ring-0",
+    bar: "bg-indigo-500 dark:bg-white/50",
   },
 ];
-
-const floatVariants: Variants = {
-  initial: { opacity: 0, y: 24, scale: 0.94 },
-  animate: (c: ChaosItem) => ({
-    opacity: [0.35, 0.9, 0.55, 0.9],
-    y: [0, -10, 4, -6],
-    x: [0, 6, -4, 0],
-    rotate: [c.rotate, c.rotate + 2, c.rotate - 2, c.rotate],
-    transition: {
-      duration: 7 + c.delay * 2,
-      repeat: Infinity,
-      ease: "easeInOut",
-      delay: c.delay,
-    },
-  }),
-};
 
 const outputVariants: Variants = {
   initial: { opacity: 0, x: 28, filter: "blur(8px)" },
@@ -168,7 +168,13 @@ function ChannelBadge({ channel }: { channel: ChaosItem["channel"] }) {
   );
 }
 
-function OutputGlyph({ kind }: { kind: OutputCard["kind"] }) {
+function OutputGlyph({
+  kind,
+  className,
+}: {
+  kind: OutputCard["kind"];
+  className?: string;
+}) {
   const map: Record<OutputCard["kind"], string> = {
     lead: "◎",
     crm: "▣",
@@ -177,7 +183,12 @@ function OutputGlyph({ kind }: { kind: OutputCard["kind"] }) {
     analytics: "▦",
   };
   return (
-    <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-white/5 text-sm text-white/70">
+    <span
+      className={cn(
+        "flex h-8 w-8 items-center justify-center rounded-lg text-sm font-semibold",
+        className
+      )}
+    >
       {map[kind]}
     </span>
   );
@@ -204,7 +215,7 @@ function ParticleField({ reduced }: { reduced: boolean }) {
       {dots.map((d) => (
         <motion.span
           key={d.id}
-          className="absolute rounded-full bg-white/25"
+          className="absolute rounded-full bg-zinc-400/45 dark:bg-white/25"
           style={{
             left: d.left,
             top: d.top,
@@ -226,33 +237,33 @@ function ParticleField({ reduced }: { reduced: boolean }) {
 
 function AiCore({ reduced }: { reduced: boolean }) {
   return (
-    <div className="relative flex h-[220px] w-[220px] items-center justify-center sm:h-[260px] sm:w-[260px] lg:h-[300px] lg:w-[300px]">
-      {/* Ambient bloom */}
-      <div className="absolute inset-[-18%] rounded-full bg-[radial-gradient(circle,rgba(124,58,237,0.35),rgba(37,99,235,0.12)_45%,transparent_70%)] blur-2xl" />
+    <div className="relative flex h-[180px] w-[180px] items-center justify-center sm:h-[220px] sm:w-[220px] lg:h-[260px] lg:w-[260px]">
+      {/* Soft aura — restrained on light, rich on dark */}
+      <div className="absolute inset-[-22%] rounded-full bg-[radial-gradient(circle,rgba(99,102,241,0.18),rgba(59,130,246,0.08)_45%,transparent_70%)] blur-2xl dark:bg-[radial-gradient(circle,rgba(124,58,237,0.35),rgba(37,99,235,0.12)_45%,transparent_70%)]" />
+      <div className="absolute inset-[-6%] rounded-full bg-[radial-gradient(circle,rgba(148,163,184,0.25),transparent_65%)] blur-xl dark:hidden" />
 
       {!reduced && (
         <>
           <motion.div
-            className="absolute inset-0 rounded-full border border-violet-400/25"
+            className="absolute inset-0 rounded-full border border-zinc-300/80 dark:border-violet-400/25"
             animate={{ rotate: 360 }}
             transition={{ duration: 28, repeat: Infinity, ease: "linear" }}
           />
           <motion.div
-            className="absolute inset-[10%] rounded-full border border-dashed border-sky-400/30"
+            className="absolute inset-[10%] rounded-full border border-dashed border-sky-400/45 dark:border-sky-400/30"
             animate={{ rotate: -360 }}
             transition={{ duration: 18, repeat: Infinity, ease: "linear" }}
           />
           <motion.div
-            className="absolute inset-[22%] rounded-full border border-violet-300/20"
+            className="absolute inset-[22%] rounded-full border border-indigo-300/40 dark:border-violet-300/20"
             animate={{ rotate: 360 }}
             transition={{ duration: 12, repeat: Infinity, ease: "linear" }}
           />
         </>
       )}
 
-      {/* Neural nodes */}
       <svg
-        className="absolute inset-[18%] h-[64%] w-[64%] opacity-70"
+        className="absolute inset-[18%] h-[64%] w-[64%] opacity-85 dark:opacity-70"
         viewBox="0 0 100 100"
         aria-hidden
       >
@@ -273,19 +284,19 @@ function AiCore({ reduced }: { reduced: boolean }) {
                 y1={arr[Math.floor(i / 2)]![1]}
                 x2={x}
                 y2={y}
-                stroke="rgba(167,139,250,0.35)"
-                strokeWidth="0.6"
+                className="stroke-indigo-400/45 dark:stroke-violet-300/35"
+                strokeWidth="0.7"
               />
             )}
             <motion.circle
               cx={x}
               cy={y}
               r="2.2"
-              fill="rgba(196,181,253,0.9)"
+              className="fill-indigo-500 dark:fill-violet-200"
               animate={
                 reduced
                   ? undefined
-                  : { opacity: [0.35, 1, 0.35], r: [1.8, 2.6, 1.8] }
+                  : { opacity: [0.45, 1, 0.45], r: [1.8, 2.6, 1.8] }
               }
               transition={{
                 duration: 2.4,
@@ -297,31 +308,27 @@ function AiCore({ reduced }: { reduced: boolean }) {
         ))}
       </svg>
 
-      {/* Glass orb */}
       <motion.div
-        className="relative z-10 flex h-[42%] w-[42%] items-center justify-center rounded-full border border-white/20 bg-gradient-to-br from-white/15 via-violet-500/20 to-blue-600/30 shadow-[0_0_60px_rgba(124,58,237,0.45)] backdrop-blur-xl"
+        className="relative z-10 flex h-[42%] w-[42%] items-center justify-center rounded-full border border-zinc-200 bg-gradient-to-br from-white via-slate-50 to-sky-50 shadow-[0_0_40px_rgba(99,102,241,0.18),0_10px_28px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:border-white/20 dark:from-white/15 dark:via-violet-500/20 dark:to-blue-600/30 dark:shadow-[0_0_60px_rgba(124,58,237,0.45)]"
         animate={
           reduced
             ? undefined
-            : { scale: [1, 1.04, 1], boxShadow: [
-                "0 0 50px rgba(124,58,237,0.35)",
-                "0 0 80px rgba(59,130,246,0.45)",
-                "0 0 50px rgba(124,58,237,0.35)",
-              ] }
+            : {
+                scale: [1, 1.04, 1],
+              }
         }
         transition={{ duration: 3.2, repeat: Infinity, ease: "easeInOut" }}
       >
-        <span className="font-[family-name:var(--font-marketing-display)] text-sm font-semibold tracking-[0.2em] text-white/90">
+        <span className="font-[family-name:var(--font-marketing-display)] text-sm font-semibold tracking-[0.2em] text-zinc-900 dark:text-white/90">
           AI
         </span>
       </motion.div>
 
-      {/* Orbiting particles into core */}
       {!reduced &&
         [0, 1, 2, 3, 4, 5].map((i) => (
           <motion.span
             key={i}
-            className="absolute h-1.5 w-1.5 rounded-full bg-sky-300 shadow-[0_0_10px_rgba(125,211,252,0.9)]"
+            className="absolute h-1.5 w-1.5 rounded-full bg-sky-500 shadow-[0_0_10px_rgba(14,165,233,0.7)] dark:bg-sky-300 dark:shadow-[0_0_10px_rgba(125,211,252,0.9)]"
             style={{ left: "50%", top: "50%" }}
             animate={{
               x: [Math.cos((i / 6) * Math.PI * 2) * 120, 0],
@@ -344,7 +351,7 @@ function AiCore({ reduced }: { reduced: boolean }) {
 function StreamLines({ reduced }: { reduced: boolean }) {
   if (reduced) {
     return (
-      <div className="pointer-events-none absolute inset-x-[18%] top-1/2 hidden h-px -translate-y-1/2 bg-gradient-to-r from-transparent via-violet-400/30 to-transparent lg:block" />
+      <div className="pointer-events-none absolute inset-x-[18%] top-1/2 hidden h-px -translate-y-1/2 bg-gradient-to-r from-transparent via-violet-400/40 to-transparent lg:block" />
     );
   }
 
@@ -355,7 +362,6 @@ function StreamLines({ reduced }: { reduced: boolean }) {
       fill="none"
       aria-hidden
     >
-      {/* Left chaos → core */}
       {[
         "M140 160 C320 180, 420 300, 600 350",
         "M120 280 C300 300, 430 340, 600 350",
@@ -365,16 +371,22 @@ function StreamLines({ reduced }: { reduced: boolean }) {
         <g key={d}>
           <path
             d={d}
-            stroke="rgba(139,92,246,0.22)"
-            strokeWidth="1.2"
+            className="stroke-violet-600/55 dark:stroke-violet-400/40"
+            strokeWidth="1.5"
             strokeDasharray="4 8"
           />
-          <motion.circle r="3" fill="rgba(196,181,253,0.95)">
-            <animateMotion dur={`${2.6 + i * 0.25}s`} repeatCount="indefinite" path={d} />
+          <motion.circle
+            r="3"
+            className="fill-violet-600 dark:fill-violet-200"
+          >
+            <animateMotion
+              dur={`${2.6 + i * 0.25}s`}
+              repeatCount="indefinite"
+              path={d}
+            />
           </motion.circle>
         </g>
       ))}
-      {/* Core → organized */}
       {[
         "M600 350 C760 320, 880 220, 1040 180",
         "M600 350 C760 340, 880 300, 1040 290",
@@ -384,11 +396,11 @@ function StreamLines({ reduced }: { reduced: boolean }) {
         <g key={d}>
           <path
             d={d}
-            stroke="rgba(56,189,248,0.22)"
-            strokeWidth="1.2"
+            className="stroke-sky-600/55 dark:stroke-sky-400/40"
+            strokeWidth="1.5"
             strokeDasharray="4 8"
           />
-          <motion.circle r="3" fill="rgba(125,211,252,0.95)">
+          <motion.circle r="3" className="fill-sky-600 dark:fill-sky-300">
             <animateMotion
               dur={`${2.4 + i * 0.2}s`}
               begin="0.4s"
@@ -411,11 +423,39 @@ export function Hero() {
   const [hoveredOut, setHoveredOut] = useState<string | null>(null);
 
   return (
-    <section className="relative isolate min-h-dvh overflow-hidden bg-[#05060a] text-white">
-      {/* Background */}
-      <div className="absolute inset-0 bg-[radial-gradient(ellipse_80%_60%_at_50%_35%,rgba(76,29,149,0.28),transparent_55%),radial-gradient(ellipse_50%_40%_at_80%_70%,rgba(30,64,175,0.18),transparent_50%),#05060a]" />
+    <section className="relative isolate h-full max-h-dvh overflow-hidden bg-background text-foreground">
+      {/* Light canvas only */}
       <div
-        className="absolute inset-0 opacity-[0.35]"
+        className="absolute inset-0 dark:hidden"
+        style={{
+          backgroundImage:
+            "radial-gradient(ellipse 70% 50% at 50% 38%, rgba(99,102,241,0.08), transparent 58%), radial-gradient(ellipse 45% 38% at 80% 72%, rgba(59,130,246,0.06), transparent 55%), linear-gradient(180deg, #f7f8fa 0%, #f4f5f7 50%, #f1f2f4 100%)",
+        }}
+        aria-hidden
+      />
+      {/* Dark canvas — original look */}
+      <div
+        className="absolute inset-0 hidden dark:block"
+        style={{
+          backgroundImage:
+            "radial-gradient(ellipse 80% 60% at 50% 35%, rgba(76,29,149,0.28), transparent 55%), radial-gradient(ellipse 50% 40% at 80% 70%, rgba(30,64,175,0.18), transparent 50%)",
+          backgroundColor: "#05060a",
+        }}
+        aria-hidden
+      />
+      <div
+        className="absolute inset-0 opacity-[0.35] dark:hidden"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(24,24,27,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(24,24,27,0.05) 1px, transparent 1px)",
+          backgroundSize: "64px 64px",
+          maskImage:
+            "radial-gradient(ellipse 70% 55% at 50% 40%, black, transparent)",
+        }}
+        aria-hidden
+      />
+      <div
+        className="absolute inset-0 hidden opacity-[0.35] dark:block"
         style={{
           backgroundImage:
             "linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px)",
@@ -427,14 +467,13 @@ export function Hero() {
       />
       <ParticleField reduced={reduced} />
 
-      <div className="relative z-10 mx-auto flex min-h-dvh max-w-7xl flex-col px-4 pb-10 pt-20 sm:px-6 lg:px-8">
-        {/* Copy — brand-forward, one composition */}
-        <div className="relative z-20 mx-auto max-w-3xl pt-4 text-center lg:pt-8">
+      <div className="relative z-10 mx-auto flex h-full max-w-7xl flex-col px-4 pb-4 pt-16 sm:px-6 lg:px-8">
+        <div className="relative z-20 mx-auto max-w-3xl shrink-0 pt-2 text-center lg:pt-4">
           <motion.p
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="font-[family-name:var(--font-marketing-display)] text-sm font-semibold tracking-[0.28em] text-violet-300/80"
+            className="font-[family-name:var(--font-marketing-display)] text-sm font-semibold tracking-[0.28em] text-zinc-500 dark:text-violet-300/80"
           >
             INBOXFLOW AI
           </motion.p>
@@ -442,7 +481,7 @@ export function Hero() {
             initial={{ opacity: 0, y: 16 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.08 }}
-            className="mt-4 font-[family-name:var(--font-marketing-display)] text-4xl font-semibold tracking-tight text-white sm:text-5xl lg:text-6xl"
+            className="mt-3 font-[family-name:var(--font-marketing-display)] text-3xl font-semibold tracking-tight text-foreground sm:text-4xl lg:text-5xl"
           >
             Turn Conversations Into Structured Work
           </motion.h1>
@@ -450,7 +489,7 @@ export function Hero() {
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.7, delay: 0.16 }}
-            className="mx-auto mt-4 max-w-2xl text-base leading-relaxed text-white/55 sm:text-lg"
+            className="mx-auto mt-3 max-w-2xl text-sm leading-relaxed text-zinc-600 dark:text-muted-foreground sm:text-base"
           >
             Connect Gmail and WhatsApp. InboxFlow AI automatically extracts data,
             creates records, assigns tasks, and powers your workflows.
@@ -459,78 +498,80 @@ export function Hero() {
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.65, delay: 0.24 }}
-            className="mt-8 flex flex-wrap items-center justify-center gap-3"
+            className="mt-5 flex flex-wrap items-center justify-center gap-3"
           >
             <a
               href="/sign-up"
-              className="rounded-full bg-white px-7 py-3 text-sm font-semibold text-zinc-950 transition hover:bg-white/90"
+              className="rounded-full bg-foreground px-7 py-3 text-sm font-semibold text-background transition hover:opacity-90"
             >
               Start Free
             </a>
             <a
               href="/create"
-              className="rounded-full border border-white/15 bg-white/5 px-7 py-3 text-sm font-medium text-white/90 backdrop-blur transition hover:bg-white/10"
+              className="rounded-full border border-zinc-300 bg-white px-7 py-3 text-sm font-medium text-zinc-900 shadow-sm transition hover:bg-zinc-50 dark:border-border dark:bg-background/60 dark:text-foreground dark:shadow-none dark:hover:bg-muted"
             >
               Watch Demo
             </a>
           </motion.div>
         </div>
 
-        {/* Visual story: Chaos → AI → Organized */}
-        <div className="relative mt-8 flex flex-1 items-center lg:mt-4">
+        <div className="relative mt-4 flex min-h-0 flex-1 items-center lg:mt-2">
           <StreamLines reduced={reduced} />
 
-          <div className="grid w-full grid-cols-1 items-center gap-8 lg:grid-cols-[1fr_auto_1fr] lg:gap-4">
-            {/* LEFT — chaos */}
-            <div className="relative mx-auto h-[280px] w-full max-w-md lg:mx-0 lg:h-[420px]">
-              <p className="mb-3 text-center text-[10px] font-semibold uppercase tracking-[0.28em] text-white/35 lg:text-left">
+          <div className="grid w-full grid-cols-1 items-center gap-6 lg:grid-cols-[1fr_auto_1fr] lg:gap-4">
+            <div className="relative mx-auto h-[240px] w-full max-w-md lg:mx-0 lg:h-[360px]">
+              <p className="mb-2 text-center text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-500 dark:text-muted-foreground lg:text-left">
                 Chaos
               </p>
-              <div className="relative h-[240px] lg:h-[380px]">
+              <div className="relative h-[210px] lg:h-[330px]">
                 {CHAOS.map((item) => (
-                  <motion.article
+                  <article
                     key={item.id}
-                    custom={item}
-                    variants={floatVariants}
-                    initial="initial"
-                    animate="animate"
-                    className={cn(
-                      "absolute w-[78%] max-w-[240px] rounded-2xl border border-white/10 bg-white/[0.04] p-3 shadow-[0_20px_50px_rgba(0,0,0,0.35)] backdrop-blur-md",
-                      "left-[8%]"
-                    )}
-                    style={{ top: `${item.y}%` }}
+                    className="chaos-float absolute left-[8%] w-[78%] max-w-[240px]"
+                    style={
+                      {
+                        top: `${item.y}%`,
+                        "--chaos-rot": `${item.rotate}deg`,
+                        "--chaos-dur": `${5.5 + item.delay * 1.5}s`,
+                        "--chaos-delay": `${item.delay}s`,
+                      } as CSSProperties
+                    }
                   >
-                    <div className="flex items-center gap-2">
-                      <ChannelBadge channel={item.channel} />
-                      <p className="truncate text-xs font-medium text-white/85">
-                        {item.title}
+                    <div
+                      className={cn(
+                        "rounded-2xl border border-zinc-200/90 bg-white/90 p-3 shadow-[0_12px_32px_rgba(15,23,42,0.08)] ring-1 ring-zinc-950/5 backdrop-blur-md dark:border-white/10 dark:bg-white/[0.06] dark:shadow-[0_20px_50px_rgba(0,0,0,0.35)] dark:ring-0"
+                      )}
+                    >
+                      <div className="flex items-center gap-2">
+                        <ChannelBadge channel={item.channel} />
+                        <p className="truncate text-xs font-semibold text-zinc-900 dark:text-foreground/90">
+                          {item.title}
+                        </p>
+                      </div>
+                      <p className="mt-1.5 line-clamp-2 text-[11px] leading-snug text-zinc-600 dark:text-muted-foreground">
+                        {item.preview}
                       </p>
                     </div>
-                    <p className="mt-1.5 line-clamp-2 text-[11px] leading-snug text-white/45">
-                      {item.preview}
-                    </p>
-                  </motion.article>
+                  </article>
                 ))}
               </div>
             </div>
 
-            {/* CENTER — AI core */}
             <div className="relative z-10 flex flex-col items-center">
-              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.28em] text-violet-300/70">
+              <p className="mb-2 text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-600 dark:text-violet-300/70">
                 AI Core
               </p>
               <AiCore reduced={reduced} />
-              <p className="mt-3 text-[10px] uppercase tracking-[0.22em] text-white/30">
+              <p className="mt-3 text-[10px] font-medium uppercase tracking-[0.22em] text-zinc-500 dark:text-muted-foreground">
                 Extract · Structure · Route
               </p>
             </div>
 
-            {/* RIGHT — organized */}
             <div className="relative mx-auto w-full max-w-md lg:mx-0">
-              <p className="mb-3 text-center text-[10px] font-semibold uppercase tracking-[0.28em] text-white/35 lg:text-right">
+              <p className="mb-3 text-center text-[10px] font-semibold uppercase tracking-[0.28em] text-zinc-600 dark:text-muted-foreground lg:text-right">
                 Organized workspace
               </p>
-              <div className="flex flex-col gap-2.5">
+              <div className="flex flex-col gap-2">
                 <AnimatePresence>
                   {OUTPUTS.map((card, i) => (
                     <motion.article
@@ -542,37 +583,34 @@ export function Hero() {
                       onHoverStart={() => setHoveredOut(card.id)}
                       onHoverEnd={() => setHoveredOut(null)}
                       className={cn(
-                        "rounded-2xl border border-white/10 bg-gradient-to-r p-3 shadow-[0_16px_40px_rgba(0,0,0,0.3)] backdrop-blur-md transition-transform",
+                        "rounded-2xl border bg-gradient-to-r p-3 shadow-[0_10px_28px_rgba(15,23,42,0.07)] backdrop-blur-md transition-transform dark:shadow-[0_16px_40px_rgba(0,0,0,0.3)]",
                         card.accent,
                         hoveredOut === card.id && "scale-[1.02]"
                       )}
-                      style={{
-                        animationDelay: `${i * 80}ms`,
-                      }}
                     >
                       <div className="flex items-center gap-3">
-                        <OutputGlyph kind={card.kind} />
+                        <OutputGlyph kind={card.kind} className={card.glyph} />
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm font-medium text-white">
+                          <p className="truncate text-sm font-semibold text-zinc-900 dark:text-foreground">
                             {card.title}
                           </p>
-                          <p className="truncate text-[11px] text-white/45">
+                          <p className="truncate text-[11px] font-medium text-zinc-600 dark:text-muted-foreground">
                             {card.meta}
                           </p>
                         </div>
-                        <span className="rounded-full bg-white/10 px-2 py-0.5 text-[9px] uppercase tracking-wide text-white/50">
+                        <span className="rounded-full border border-zinc-300/90 bg-white px-2 py-0.5 text-[9px] font-bold uppercase tracking-wide text-zinc-700 shadow-sm dark:border-transparent dark:bg-white/10 dark:font-semibold dark:text-white/50 dark:shadow-none">
                           Auto
                         </span>
                       </div>
                       {!reduced && (
                         <motion.div
-                          className="mt-2 h-0.5 overflow-hidden rounded-full bg-white/10"
+                          className="mt-2.5 h-1 overflow-hidden rounded-full bg-zinc-200/90 dark:bg-white/10"
                           initial={{ opacity: 0 }}
                           animate={{ opacity: 1 }}
                           transition={{ delay: 1 + i * 0.1 }}
                         >
                           <motion.div
-                            className="h-full rounded-full bg-white/50"
+                            className={cn("h-full rounded-full", card.bar)}
                             animate={{ width: ["12%", "100%", "70%"] }}
                             transition={{
                               duration: 4.5,
@@ -591,7 +629,7 @@ export function Hero() {
           </div>
         </div>
 
-        <p className="mt-6 text-center text-[10px] uppercase tracking-[0.3em] text-white/25">
+        <p className="mt-2 shrink-0 text-center text-[10px] font-medium uppercase tracking-[0.3em] text-zinc-500 dark:text-muted-foreground/70">
           Conversations in · Structured work out
         </p>
       </div>

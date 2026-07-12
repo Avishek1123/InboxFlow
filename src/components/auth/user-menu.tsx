@@ -31,17 +31,8 @@ export function UserMenu() {
     );
   }
 
-  const label =
-    user.displayName ||
-    user.email ||
-    user.phoneNumber ||
-    "Account";
-
   return (
     <div className="flex items-center gap-2">
-      <span className="hidden max-w-[140px] truncate text-sm text-muted-foreground sm:inline">
-        {label}
-      </span>
       <button
         type="button"
         onClick={async () => {
@@ -49,7 +40,7 @@ export function UserMenu() {
           router.push("/");
           router.refresh();
         }}
-        className="rounded-md border border-border px-3 py-1.5 text-sm hover:bg-muted"
+        className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 hover:bg-zinc-50 dark:border-border dark:bg-transparent dark:text-foreground dark:hover:bg-muted"
       >
         Sign out
       </button>

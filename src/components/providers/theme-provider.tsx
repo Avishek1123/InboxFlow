@@ -8,6 +8,7 @@ import {
   useMemo,
   useState,
 } from "react";
+import { flushSync } from "react-dom";
 import {
   THEME_STORAGE_KEY,
   applyThemeToDocument,
@@ -15,11 +16,15 @@ import {
   type ResolvedTheme,
   type Theme,
 } from "@/lib/theme";
+import {
+  runThemeTransition,
+  type ThemeTransitionOrigin,
+} from "@/lib/theme-transition";
 
 type ThemeContextValue = {
   theme: Theme;
   resolved: ResolvedTheme;
-  setTheme: (theme: Theme) => void;
+  setTheme: (theme: Theme, origin?: ThemeTransitionOrigin) => void;
 };
 
 const ThemeContext = createContext<ThemeContextValue | null>(null);
@@ -46,14 +51,20 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
     setReady(true);
   }, []);
 
-  const setTheme = useCallback((next: Theme) => {
-    setThemeState(next);
-    try {
-      localStorage.setItem(THEME_STORAGE_KEY, next);
-    } catch {
-      /* ignore */
-    }
-    setResolved(applyThemeToDocument(next));
+  const setTheme = useCallback((next: Theme, origin?: ThemeTransitionOrigin) => {
+    const apply = () => {
+      flushSync(() => {
+        setThemeState(next);
+        setResolved(applyThemeToDocument(next));
+      });
+      try {
+        localStorage.setItem(THEME_STORAGE_KEY, next);
+      } catch {
+        /* ignore */
+      }
+    };
+
+    runThemeTransition(apply, origin);
   }, []);
 
   useEffect(() => {

@@ -30,7 +30,9 @@ export function AppearanceSettings() {
           <button
             key={option}
             type="button"
-            onClick={() => setTheme(option)}
+            onClick={(e) =>
+              setTheme(option, { x: e.clientX, y: e.clientY })
+            }
             className={cn(
               "rounded-xl border px-4 py-3 text-left text-sm transition-colors",
               theme === option

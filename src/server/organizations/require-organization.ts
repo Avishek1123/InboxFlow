@@ -13,6 +13,22 @@ export type OrganizationContext = {
 export async function requireOrganization(): Promise<OrganizationContext> {
   const session = await requireServerSession();
 
+  // One query covers the common path (user already has a workspace).
+  const existing = await prisma.organizationMember.findFirst({
+    where: { user: { firebaseUid: session.uid } },
+    include: { user: true, organization: true },
+    orderBy: { createdAt: "asc" },
+  });
+
+  if (existing) {
+    return {
+      user: existing.user,
+      organization: existing.organization,
+      membership: existing,
+    };
+  }
+
+  // Fallback: email match or first-time workspace create.
   let user = await prisma.user.findUnique({
     where: { firebaseUid: session.uid },
   });

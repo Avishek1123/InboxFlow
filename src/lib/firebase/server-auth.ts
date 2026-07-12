@@ -14,7 +14,9 @@ export async function getServerSession(): Promise<DecodedIdToken | null> {
   if (!session) return null;
 
   try {
-    return await getAdminAuth().verifySessionCookie(session, true);
+    // checkRevoked=false: avoids an extra Firebase network round-trip on every
+    // dashboard navigation. Signature + expiry are still verified locally.
+    return await getAdminAuth().verifySessionCookie(session, false);
   } catch {
     return null;
   }

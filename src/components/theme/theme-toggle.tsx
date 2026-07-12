@@ -1,5 +1,6 @@
 "use client";
 
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import { useTheme } from "@/components/providers/theme-provider";
 import { cn } from "@/lib/utils";
 
@@ -42,23 +43,48 @@ type ThemeToggleProps = {
 export function ThemeToggle({ className }: ThemeToggleProps) {
   const { resolved, setTheme } = useTheme();
   const isDark = resolved === "dark";
+  const reduced = useReducedMotion() ?? false;
 
   return (
     <button
       type="button"
-      onClick={() => setTheme(isDark ? "light" : "dark")}
+      onClick={(e) => {
+        setTheme(isDark ? "light" : "dark", {
+          x: e.clientX,
+          y: e.clientY,
+        });
+      }}
       className={cn(
-        "inline-flex h-9 w-9 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        "relative inline-flex h-9 w-9 items-center justify-center overflow-hidden rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         className
       )}
       aria-label={isDark ? "Switch to light mode" : "Switch to dark mode"}
       title={isDark ? "Light mode" : "Dark mode"}
     >
-      {isDark ? (
-        <SunIcon className="h-4 w-4" />
-      ) : (
-        <MoonIcon className="h-4 w-4" />
-      )}
+      <AnimatePresence mode="wait" initial={false}>
+        <motion.span
+          key={isDark ? "sun" : "moon"}
+          className="absolute inset-0 flex items-center justify-center"
+          initial={
+            reduced
+              ? false
+              : { opacity: 0, rotate: -90, scale: 0.4, filter: "blur(4px)" }
+          }
+          animate={{ opacity: 1, rotate: 0, scale: 1, filter: "blur(0px)" }}
+          exit={
+            reduced
+              ? undefined
+              : { opacity: 0, rotate: 90, scale: 0.4, filter: "blur(4px)" }
+          }
+          transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
+        >
+          {isDark ? (
+            <SunIcon className="h-4 w-4" />
+          ) : (
+            <MoonIcon className="h-4 w-4" />
+          )}
+        </motion.span>
+      </AnimatePresence>
     </button>
   );
 }
