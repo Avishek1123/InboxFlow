@@ -322,13 +322,20 @@ export async function POST(request: Request) {
         if (existing) {
           await sheetExportRepository.delete(existing.id, organization.id);
         }
-        if (!hasReachablePublicAppUrl(requestOrigin)) {
-          await startDevTunnelIfEnabled();
+
+        const { sheetSyncVia } = getSyncPipelineConfig();
+        let apiBaseUrl = requestOrigin;
+        // Apps Script pull needs a public URL; server-push does not.
+        if (sheetSyncVia === "script") {
+          if (!hasReachablePublicAppUrl(requestOrigin)) {
+            await startDevTunnelIfEnabled();
+          }
+          const publicUrlHealth =
+            await ensureHealthyPublicAppUrl(requestOrigin);
+          apiBaseUrl = publicUrlHealth.reachable
+            ? publicUrlHealth.url
+            : requestOrigin;
         }
-        const publicUrlHealth = await ensureHealthyPublicAppUrl(requestOrigin);
-        const apiBaseUrl = publicUrlHealth.reachable
-          ? publicUrlHealth.url
-          : requestOrigin;
 
         const { key, hash, prefix } = generateSheetSyncApiKey();
         const sheetTitle = resolvedSheetTitle;
@@ -366,55 +373,76 @@ export async function POST(request: Request) {
         };
       }
 
-      // Auto-wire Apps Script timer — user should not open the sheet menu.
+      const { sheetSyncVia } = getSyncPipelineConfig();
       let autoSyncOn = false;
-      try {
-        const { account } = await getGoogleAuthClientForOrganization(
-          organization.id
-        );
-        const auth = await ensureSheetsOAuthClient(account);
-        const installed = await installSheetExportTrigger({
-          auth,
-          organizationId: organization.id,
-          exportId,
-          requestOrigin,
-          repairOnly: false,
-          triggerMinutes: syncMinutes,
-        });
-        autoSyncOn = installed.triggerInstalled;
+
+      if (sheetSyncVia === "server") {
+        // Preferred path: InboxFlow pushes via Sheets API. Keep-alive handles the interval.
+        autoSyncOn = true;
         if (sheet) {
-          sheet.autoSyncOn = autoSyncOn;
-          sheet.setupNote = installed.message;
-          if (!autoSyncOn && installed.reason === "authorization") {
+          sheet.autoSyncOn = true;
+          sheet.needsGooglePermissions = false;
+          sheet.setupNote =
+            sheet.setupNote ??
+            `InboxFlow updates this sheet every ${syncMinutes} min (Gmail → AI → Sheets). Keep npm run dev running.`;
+        }
+        try {
+          const { pushSheetExportDataFromServer } = await import(
+            "@/server/google-sheets/push-sheet-export-data"
+          );
+          await pushSheetExportDataFromServer({
+            organizationId: organization.id,
+            exportId,
+          });
+        } catch (pushErr) {
+          console.warn("[studio/launch] server sheet push:", pushErr);
+        }
+      } else {
+        // Legacy: Auto-wire Apps Script timer.
+        try {
+          const { account } = await getGoogleAuthClientForOrganization(
+            organization.id
+          );
+          const auth = await ensureSheetsOAuthClient(account);
+          const installed = await installSheetExportTrigger({
+            auth,
+            organizationId: organization.id,
+            exportId,
+            requestOrigin,
+            repairOnly: false,
+            triggerMinutes: syncMinutes,
+          });
+          autoSyncOn = installed.triggerInstalled;
+          if (sheet) {
+            sheet.autoSyncOn = autoSyncOn;
+            sheet.setupNote = installed.message;
+            if (!autoSyncOn && installed.reason === "authorization") {
+              sheet.needsGooglePermissions = true;
+              sheet.reconnectUrl = buildGmailReconnectUrl(requestOrigin, {
+                popup: true,
+                sheetExportId: exportId,
+              });
+            } else {
+              sheet.needsGooglePermissions = false;
+            }
+          }
+        } catch (syncErr) {
+          console.warn("[studio/launch] auto-sync wire:", syncErr);
+          if (sheet) {
             sheet.needsGooglePermissions = true;
             sheet.reconnectUrl = buildGmailReconnectUrl(requestOrigin, {
               popup: true,
               sheetExportId: exportId,
             });
-          } else {
-            sheet.needsGooglePermissions = false;
+            sheet.setupNote =
+              syncErr instanceof Error
+                ? syncErr.message
+                : "One Google approval is needed to finish auto-sync.";
           }
-        }
-      } catch (syncErr) {
-        console.warn("[studio/launch] auto-sync wire:", syncErr);
-        if (sheet) {
-          sheet.needsGooglePermissions = true;
-          sheet.reconnectUrl = buildGmailReconnectUrl(requestOrigin, {
-            popup: true,
-            sheetExportId: exportId,
-          });
-          sheet.setupNote =
-            syncErr instanceof Error
-              ? syncErr.message
-              : "One Google approval is needed to finish auto-sync.";
         }
       }
 
       graph = wireSheetIntoGraph(graph, sheet!);
-
-      // Do not await a full Gmail→extract→sheet sync here — it often exceeds
-      // serverless/gateway limits (504). Install already pushed rows when possible;
-      // keep-alive / sheet timer finishes the rest.
     }
 
     const triggerType = (

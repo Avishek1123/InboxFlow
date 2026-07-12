@@ -487,8 +487,10 @@ export function CreateStudio() {
               </p>
               <p className="mt-2 text-xs text-muted-foreground">
                 {ready.automation.status}
-                {ready.sheet?.syncMinutes
-                  ? ` · sheet sync every ${ready.sheet.syncMinutes} min`
+                {ready.sheet
+                  ? ready.sheet.autoSyncOn
+                    ? ` · sheet sync every ${ready.sheet.syncMinutes ?? syncIntervalMinutes} min`
+                    : " · sheet auto-sync needs setup"
                   : ""}
                 {" · "}
                 {ready.draft.nodeCount} steps
@@ -509,14 +511,12 @@ export function CreateStudio() {
                   {ready.sheet.spreadsheetUrl}
                 </a>
                 <p className="mt-2 text-[11px] text-muted-foreground">
-                  {asksForAutoUpdate || ready.sheet.autoSyncOn
-                    ? `New mail updates this sheet every ${ready.sheet.syncMinutes ?? syncIntervalMinutes} min while InboxFlow is running — no manual Sync needed.`
-                    : "Your sheet is ready. Mention auto-update in a new prompt if you want a refresh schedule."}
                   {ready.sheet.autoSyncOn
-                    ? " Sheet timer is also wired."
-                    : ready.sheet.setupNote
-                      ? ` ${ready.sheet.setupNote}`
-                      : ""}
+                    ? `InboxFlow updates this sheet every ${ready.sheet.syncMinutes ?? syncIntervalMinutes} min while the app is running (Gmail → AI → Google Sheets). No Apps Script required.`
+                    : asksForAutoUpdate
+                      ? `Auto-update every ${ready.sheet.syncMinutes ?? syncIntervalMinutes} min is requested — finish Google Sheets permission if prompted, then keep InboxFlow running.`
+                      : "Your sheet is ready. Mention auto-update in a new prompt if you want a refresh schedule."}
+                  {ready.sheet.setupNote ? ` ${ready.sheet.setupNote}` : ""}
                 </p>
                 {ready.sheet.needsGooglePermissions && (
                   <button

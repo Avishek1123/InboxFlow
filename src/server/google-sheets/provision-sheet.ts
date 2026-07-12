@@ -94,7 +94,23 @@ export async function provisionGoogleSheetExport(params: {
     );
   }
 
-  // Google Apps Script runs in Google's cloud — localhost / 127.0.0.1 will DNS-fail.
+  const { sheetSyncVia, sheetTriggerMinutes } = getSyncPipelineConfig();
+  const triggerMinutes = params.triggerMinutes ?? sheetTriggerMinutes;
+
+  // Default path: InboxFlow server pushes via Sheets API (Gmail → AI → sheet).
+  // No Apps Script / public webhook URL required.
+  if (sheetSyncVia === "server") {
+    return {
+      spreadsheetId,
+      spreadsheetUrl,
+      appsScriptId: "",
+      scriptReady: true,
+      needsAutoSyncSetup: false,
+      setupNote: `Sheet updates from InboxFlow every ${triggerMinutes} min while the app is running (Gmail sync → AI extract → Sheets API). No Apps Script needed.`,
+    };
+  }
+
+  // Legacy path: Google Apps Script polls InboxFlow (needs a public HTTPS URL).
   if (isLocalAppUrl(params.apiBaseUrl)) {
     return {
       spreadsheetId,
@@ -106,9 +122,6 @@ export async function provisionGoogleSheetExport(params: {
         "Sheet is ready with your data. Click Enable auto-sync in InboxFlow to install the timer with a public URL (start npm run dev with NGROK_AUTHTOKEN, or deploy). Syncing from the sheet menu will not work until then.",
     };
   }
-
-  const triggerMinutes =
-    params.triggerMinutes ?? getSyncPipelineConfig().sheetTriggerMinutes;
 
   try {
     const finalized = await finalizeBoundScriptProject({
