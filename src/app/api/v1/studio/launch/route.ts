@@ -373,18 +373,9 @@ export async function POST(request: Request) {
 
       graph = wireSheetIntoGraph(graph, sheet!);
 
-      // Seed sheet immediately so the product is ready without waiting for keep-alive.
-      try {
-        const { syncSheetExportFull } = await import(
-          "@/server/google-sheets/sync-sheet-export-full"
-        );
-        await syncSheetExportFull({
-          organizationId: organization.id,
-          exportId,
-        });
-      } catch (seedErr) {
-        console.warn("[studio/launch] initial sheet sync:", seedErr);
-      }
+      // Do not await a full Gmail→extract→sheet sync here — it often exceeds
+      // serverless/gateway limits (504). Install already pushed rows when possible;
+      // keep-alive / sheet timer finishes the rest.
     }
 
     const triggerType = (

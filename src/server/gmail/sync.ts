@@ -37,7 +37,19 @@ export async function syncGmailAccount(
     account.syncLockedAt > lockExpiry &&
     account.syncLockId
   ) {
-    throw new Error("Sync already in progress for this account");
+    // Soft-skip: concurrent studio/sheet pushes must not fail the whole request.
+    return {
+      accountId: account.id,
+      stats: {
+        messagesFetched: 0,
+        messagesCreated: 0,
+        messagesSkipped: 0,
+        attachmentsStored: 0,
+        attachmentsFailed: 0,
+      },
+      newMessageIds: [],
+      pipelineRan: false,
+    };
   }
 
   await gmailRepository.updateSyncState(account.id, {

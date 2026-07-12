@@ -18,11 +18,17 @@ export function getGoogleOAuthScopes(): string[] {
 }
 
 export function getGoogleOAuthConfig() {
-  const clientId = process.env.GOOGLE_CLIENT_ID;
-  const clientSecret = process.env.GOOGLE_CLIENT_SECRET;
-  const redirectUri =
+  const clientId = process.env.GOOGLE_CLIENT_ID?.trim();
+  const clientSecret = process.env.GOOGLE_CLIENT_SECRET?.trim();
+  const appUrl = (
+    process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"
+  ).trim().replace(/\/$/, "");
+  const redirectUri = (
     process.env.GOOGLE_REDIRECT_URI ??
-    `${process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000"}/api/v1/integrations/gmail/callback`;
+    `${appUrl}/api/v1/integrations/gmail/callback`
+  )
+    .trim()
+    .replace(/^"|"$/g, "");
 
   if (!clientId || !clientSecret) {
     throw new Error(

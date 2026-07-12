@@ -101,9 +101,25 @@ async function launchStudio(
       ...(syncIntervalMinutes != null ? { syncIntervalMinutes } : {}),
     }),
   });
-  const json = await res.json();
+  const text = await res.text();
+  let json: { error?: { message?: string }; data?: LaunchResult };
+  try {
+    json = JSON.parse(text) as typeof json;
+  } catch {
+    if (res.status === 504 || /gateway|timed out|timeout/i.test(text)) {
+      throw new Error(
+        "Build timed out. Try again — if it keeps happening, reconnect Gmail and use a shorter prompt."
+      );
+    }
+    throw new Error(
+      res.status >= 500
+        ? `Server error (${res.status}). Try again in a moment.`
+        : "Launch failed with an unexpected response."
+    );
+  }
   if (json.error) throw new Error(json.error.message || "Launch failed");
-  return json.data as LaunchResult;
+  if (!json.data) throw new Error("Launch failed");
+  return json.data;
 }
 
 export function CreateStudio() {

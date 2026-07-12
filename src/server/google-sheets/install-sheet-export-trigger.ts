@@ -146,9 +146,12 @@ export async function installSheetExportTrigger(params: {
   let serverRowCount = 0;
   if (mustPushScript) {
     try {
+      // Skip Gmail pull during install — launch must stay under gateway time limits.
+      // Existing table rows still get written; keep-alive fills new mail later.
       const pushed = await pushSheetExportDataFromServer({
         organizationId: params.organizationId,
         exportId: row.id,
+        skipPrepare: true,
       });
       serverRowCount = pushed.rowCount;
     } catch (pushErr) {
