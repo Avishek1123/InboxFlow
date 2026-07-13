@@ -15,9 +15,22 @@ function getProvider(name: keyof typeof providerFactories): AiProviderAdapter {
   return providerFactories[name]();
 }
 
+function isRateLimited(message: string): boolean {
+  const lower = message.toLowerCase();
+  return (
+    lower.includes("429") ||
+    lower.includes("rate limit") ||
+    lower.includes("rate_limit") ||
+    lower.includes("quota exceeded") ||
+    lower.includes("resource_exhausted") ||
+    lower.includes("tokens per minute") ||
+    lower.includes("tpm")
+  );
+}
+
 /**
  * Cost-optimized fallback chain: tries providers in AI_PROVIDER_PRIORITY order.
- * Free-tier friendly default: groq → gemini → openrouter.
+ * Default: gemini → groq → openrouter. On 429/quota, skip retries and move on.
  */
 export async function completeWithFallback(
   request: CompletionRequest
@@ -45,6 +58,10 @@ export async function completeWithFallback(
               ? err.message
               : "Unknown";
         errors.push(`[${name}#${attempt}] ${msg}`);
+
+        // Don't burn TPM retrying a rate-limited provider — fall through.
+        if (isRateLimited(msg)) break;
+
         if (attempt < maxRetries) {
           await sleep(300 * (attempt + 1));
         }

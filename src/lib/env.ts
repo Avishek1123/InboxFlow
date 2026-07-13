@@ -16,8 +16,8 @@ const envSchema = z.object({
     .string()
     .default("meta-llama/llama-3.2-3b-instruct:free"),
 
-  /** Comma-separated provider priority: groq,gemini,openrouter */
-  AI_PROVIDER_PRIORITY: z.string().default("groq,gemini,openrouter"),
+  /** Comma-separated provider priority: gemini,groq,openrouter */
+  AI_PROVIDER_PRIORITY: z.string().default("gemini,groq,openrouter"),
   AI_MAX_INPUT_CHARS: z.coerce.number().default(12_000),
   AI_REQUEST_TIMEOUT_MS: z.coerce.number().default(30_000),
   AI_RATE_LIMIT_PER_ORG_PER_MINUTE: z.coerce.number().default(30),
