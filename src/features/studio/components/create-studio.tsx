@@ -423,9 +423,18 @@ export function CreateStudio() {
               {job.plan.columns.map((c) => c.label).join(", ")}
             </p>
             {job.permission?.message && phase === "permissions" && (
-              <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
-                {job.permission.message}
-              </p>
+              <div className="mt-3 space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
+                <p className="text-xs text-amber-900 dark:text-amber-100">
+                  {job.permission.message}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => void resumeAfterPermission()}
+                  className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-semibold text-background hover:opacity-90"
+                >
+                  Continue build
+                </button>
+              </div>
             )}
           </div>
 

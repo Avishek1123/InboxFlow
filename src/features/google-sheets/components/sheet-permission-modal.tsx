@@ -13,8 +13,9 @@ type Props = {
 };
 
 /**
- * Finishes product auto-sync inside InboxFlow — user never opens the sheet menu.
- * Flow: Google OAuth popup → install Apps Script timer via API.
+ * Finishes product auto-sync inside InboxFlow.
+ * OAuth can fix "authorization" errors. GCP project link cannot be done via API —
+ * in that case we finish and let the studio job fall back to server sync.
  */
 export function SheetPermissionModal({
   exportId,
@@ -30,7 +31,7 @@ export function SheetPermissionModal({
 
   const finishTrigger = useCallback(async () => {
     setBusy(true);
-    setStatus("Installing 1-minute auto-sync on your sheet…");
+    setStatus("Installing auto-sync on your sheet…");
     try {
       const first = await sheetExportClient.installTrigger(exportId, {
         repairOnly: false,
@@ -45,9 +46,11 @@ export function SheetPermissionModal({
         return;
       }
 
-      await new Promise((r) => setTimeout(r, 2500));
-      for (let i = 0; i < 4; i++) {
-        setStatus(`Almost done — retrying auto-sync install (${i + 1}/4)…`);
+      let reason = first.reason ?? null;
+
+      await new Promise((r) => setTimeout(r, 2000));
+      for (let i = 0; i < 3; i++) {
+        setStatus(`Retrying auto-sync install (${i + 1}/3)…`);
         const res = await sheetExportClient.installTrigger(exportId, {
           repairOnly: true,
         });
@@ -60,12 +63,24 @@ export function SheetPermissionModal({
           });
           return;
         }
-        await new Promise((r) => setTimeout(r, 4000));
+        if (res.reason) reason = res.reason;
+        await new Promise((r) => setTimeout(r, 2500));
       }
 
-      if (first.reason === "authorization" || first.reason === "gcp_project") {
+      // gcp_project cannot be fixed by another OAuth popup — continue so
+      // the studio job can enable InboxFlow server auto-fetch instead.
+      if (reason === "gcp_project") {
+        onDone({
+          installed: false,
+          message:
+            "Apps Script timer needs a GCP link Google doesn’t allow via API. Continuing with InboxFlow auto-fetch.",
+        });
+        return;
+      }
+
+      if (reason === "authorization") {
         setStatus(
-          "Google needs one more approval. Click Continue with Google, allow all checkboxes, then we’ll finish automatically."
+          "Google needs approval. Click Continue with Google, allow all checkboxes, then we’ll finish automatically."
         );
         return;
       }
@@ -74,7 +89,7 @@ export function SheetPermissionModal({
         installed: false,
         message:
           first.message ||
-          "Setup saved. Click Continue with Google once more if the timer is not on yet.",
+          "Continuing with InboxFlow auto-fetch so your product can go live.",
       });
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Setup failed");
@@ -98,7 +113,7 @@ export function SheetPermissionModal({
       `width=${w},height=${h},left=${left},top=${top}`
     );
     setStatus(
-      "In the Google popup: check every permission box, then Continue. We’ll turn on auto-sync automatically — you don’t need to open the sheet."
+      "In the Google popup: check every permission box, then Continue."
     );
   }
 
@@ -134,8 +149,8 @@ export function SheetPermissionModal({
           Finishing your product
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          One Google approval turns on the 1-minute sheet timer (starred Gmail → AI →
-          your sheet). No need to open the spreadsheet or click any sheet menu.
+          Google approval turns on auto-fetch (starred Gmail → AI → your sheet).
+          If the Apps Script timer cannot be linked, InboxFlow will sync for you.
         </p>
         {status && (
           <p className="mt-3 rounded-lg bg-muted/60 px-3 py-2 text-sm">{status}</p>
@@ -156,6 +171,19 @@ export function SheetPermissionModal({
             className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
           >
             {busy ? "Installing…" : "Retry install"}
+          </button>
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() =>
+              onDone({
+                installed: false,
+                message: "Continuing with InboxFlow auto-fetch.",
+              })
+            }
+            className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
+          >
+            Continue anyway
           </button>
           <button
             type="button"

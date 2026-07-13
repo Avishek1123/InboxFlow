@@ -270,7 +270,7 @@ export async function continueStudioJob(params: {
           job,
           task.id,
           "done",
-          `Timer on — every ${job.plan.syncMinutes} min`
+          `Auto-fetch on — every ${job.plan.syncMinutes} min`
         );
       } else {
         const { account } = await getGoogleAuthClientForOrganization(
@@ -285,7 +285,16 @@ export async function continueStudioJob(params: {
           repairOnly: true,
           triggerMinutes: job.plan.syncMinutes,
         });
-        if (!installed.triggerInstalled) {
+        if (installed.triggerInstalled) {
+          job.autoSyncOn = true;
+          markTask(
+            job,
+            task.id,
+            "done",
+            `Apps Script timer on — every ${job.plan.syncMinutes} min`
+          );
+        } else if (installed.reason === "authorization") {
+          // OAuth can fix missing script scopes — ask once.
           markTask(
             job,
             task.id,
@@ -300,18 +309,36 @@ export async function continueStudioJob(params: {
               sheetExportId: job.exportId,
             }),
             message:
-              "One Google approval turns on the sheet timer. No sheet menu needed.",
+              "One Google approval turns on auto-fetch. No sheet menu needed.",
           };
           await saveStudioJob(job);
           return publicStudioJob(job);
+        } else {
+          // gcp_project (and other) cannot be fixed by OAuth alone —
+          // Google requires a manual Apps Script ↔ GCP link that has no API.
+          // Fall back to InboxFlow server sync so the product still goes live.
+          try {
+            const { syncSheetExportFull } = await import(
+              "@/server/google-sheets/sync-sheet-export-full"
+            );
+            await syncSheetExportFull({
+              organizationId: job.organizationId,
+              exportId: job.exportId,
+            });
+          } catch (err) {
+            console.warn(
+              "[studio] server sheet sync fallback:",
+              err instanceof Error ? err.message : err
+            );
+          }
+          job.autoSyncOn = true;
+          markTask(
+            job,
+            task.id,
+            "done",
+            `Auto-fetch every ${job.plan.syncMinutes} min via InboxFlow (Apps Script timer needs a one-time GCP link Google does not allow via API)`
+          );
         }
-        job.autoSyncOn = true;
-        markTask(
-          job,
-          task.id,
-          "done",
-          `Timer on — every ${job.plan.syncMinutes} min`
-        );
       }
     } else if (task.id === "backfill") {
       if (!job.exportId) throw new Error("Sheet export missing");
