@@ -43,6 +43,6 @@ export function resolveAppsScriptGeminiModel(): string {
   return (
     process.env.APPS_SCRIPT_GEMINI_MODEL?.trim() ||
     process.env.GEMINI_MODEL?.trim() ||
-    "gemini-2.0-flash"
+    "gemini-2.5-flash-lite"
   );
 }

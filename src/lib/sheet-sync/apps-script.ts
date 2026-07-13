@@ -68,7 +68,7 @@ export function buildGoogleAppsScript(config: AppsScriptConfig): string {
   const triggerMinutes = Math.max(1, Math.min(60, config.triggerMinutes ?? 1));
   const maxThreads = Math.max(5, Math.min(50, config.maxThreads ?? 20));
   const geminiModel = escapeJsSingleQuoted(
-    config.geminiModel?.trim() || "gemini-2.0-flash"
+    config.geminiModel?.trim() || "gemini-2.5-flash-lite"
   );
   const geminiKey = escapeJsSingleQuoted(config.geminiApiKey.trim());
 

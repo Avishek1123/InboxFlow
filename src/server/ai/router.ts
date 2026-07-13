@@ -28,9 +28,18 @@ function isRateLimited(message: string): boolean {
   );
 }
 
+function parseRetryAfterSeconds(message: string): number | null {
+  const m = message.match(/try again in\s+(\d+(?:\.\d+)?)\s*s/i);
+  if (!m?.[1]) return null;
+  const seconds = Number(m[1]);
+  if (!Number.isFinite(seconds) || seconds <= 0) return null;
+  return Math.min(45, Math.ceil(seconds) + 1);
+}
+
 /**
  * Cost-optimized fallback chain: tries providers in AI_PROVIDER_PRIORITY order.
- * Default: gemini → groq → openrouter. On 429/quota, skip retries and move on.
+ * Default: gemini → groq → openrouter.
+ * On 429, wait for Retry-After once, then move to the next provider.
  */
 export async function completeWithFallback(
   request: CompletionRequest
@@ -47,6 +56,8 @@ export async function completeWithFallback(
 
   for (const name of priority) {
     const provider = getProvider(name);
+    let waitedForRateLimit = false;
+
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         return await provider.complete(request);
@@ -59,8 +70,15 @@ export async function completeWithFallback(
               : "Unknown";
         errors.push(`[${name}#${attempt}] ${msg}`);
 
-        // Don't burn TPM retrying a rate-limited provider — fall through.
-        if (isRateLimited(msg)) break;
+        if (isRateLimited(msg)) {
+          const waitSec = parseRetryAfterSeconds(msg);
+          if (!waitedForRateLimit && waitSec != null && waitSec <= 25) {
+            waitedForRateLimit = true;
+            await sleep(waitSec * 1000);
+            continue;
+          }
+          break;
+        }
 
         if (attempt < maxRetries) {
           await sleep(300 * (attempt + 1));
