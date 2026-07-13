@@ -26,13 +26,15 @@ export type SyncResult = {
 };
 
 export async function syncGmailAccount(
-  account: ConnectedAccount
+  account: ConnectedAccount,
+  options?: { bypassLock?: boolean }
 ): Promise<SyncResult> {
   const { batchSize, lockTtlMinutes } = getGmailSyncConfig();
   const lockId = randomUUID();
   const lockExpiry = new Date(Date.now() - lockTtlMinutes * 60 * 1000);
 
   if (
+    !options?.bypassLock &&
     account.syncLockedAt &&
     account.syncLockedAt > lockExpiry &&
     account.syncLockId
@@ -50,6 +52,15 @@ export async function syncGmailAccount(
       newMessageIds: [],
       pipelineRan: false,
     };
+  }
+
+  // Studio / Sync now: clear a stuck lock so starred mail can be imported.
+  if (options?.bypassLock) {
+    await gmailRepository.updateSyncState(account.id, {
+      syncLockedAt: null,
+      syncLockId: null,
+      syncStatus: "IDLE",
+    });
   }
 
   await gmailRepository.updateSyncState(account.id, {

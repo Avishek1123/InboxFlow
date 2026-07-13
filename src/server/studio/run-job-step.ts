@@ -189,6 +189,9 @@ export async function continueStudioJob(params: {
           filterIds: ["STARRED"],
           mode: "any",
         });
+        await gmailRepository.updateSyncState(gmailAccount.id, {
+          gmailHistoryId: null,
+        });
       }
       markTask(job, task.id, "done", "Google connected");
     } else if (task.id === "create_table") {
@@ -318,63 +321,69 @@ export async function continueStudioJob(params: {
           // Google requires a manual Apps Script ↔ GCP link that has no API.
           // Fall back to InboxFlow server sync so the product still goes live.
           try {
-            const { syncSheetExportFull } = await import(
-              "@/server/google-sheets/sync-sheet-export-full"
+            const { syncStarredMailToSheet } = await import(
+              "@/server/google-sheets/sync-starred-mail-to-sheet"
             );
-            await syncSheetExportFull({
+            const synced = await syncStarredMailToSheet({
               organizationId: job.organizationId,
               exportId: job.exportId,
+              starredOnly: job.plan.starredOnly,
             });
+            job.autoSyncOn = true;
+            markTask(
+              job,
+              task.id,
+              "done",
+              `Auto-fetch every ${job.plan.syncMinutes} min via InboxFlow · ${synced.rowCount} rows (${synced.messagesFetched} starred fetched)`
+            );
           } catch (err) {
             console.warn(
               "[studio] server sheet sync fallback:",
               err instanceof Error ? err.message : err
             );
+            job.autoSyncOn = true;
+            markTask(
+              job,
+              task.id,
+              "done",
+              `Auto-fetch every ${job.plan.syncMinutes} min via InboxFlow (initial sync deferred: ${err instanceof Error ? err.message : "error"})`
+            );
           }
-          job.autoSyncOn = true;
-          markTask(
-            job,
-            task.id,
-            "done",
-            `Auto-fetch every ${job.plan.syncMinutes} min via InboxFlow (Apps Script timer needs a one-time GCP link Google does not allow via API)`
-          );
         }
       }
     } else if (task.id === "backfill") {
       if (!job.exportId) throw new Error("Sheet export missing");
       try {
-        const { account } = await getGoogleAuthClientForOrganization(
-          job.organizationId
+        const { syncStarredMailToSheet } = await import(
+          "@/server/google-sheets/sync-starred-mail-to-sheet"
         );
-        const auth = await ensureSheetsOAuthClient(account);
-        const { runAppsScriptFunction } = await import(
-          "@/server/google-sheets/run-apps-script"
-        );
-        const { ensureExecutionApiDeployment } = await import(
-          "@/server/google-sheets/ensure-script-deployment"
-        );
-        const scriptId =
-          job.appsScriptId ||
-          (await sheetExportRepository.list(job.organizationId)).find(
-            (e) => e.id === job.exportId
-          )?.appsScriptId;
-        if (scriptId) {
-          const deployment = await ensureExecutionApiDeployment(auth, scriptId);
-          await runAppsScriptFunction(
-            auth,
-            { scriptId, deploymentId: deployment.deploymentId },
-            "syncInboxFlowData",
-            { devMode: true }
-          );
-        }
-        markTask(job, task.id, "done", "Initial starred-mail sync requested");
-      } catch (err) {
+        const synced = await syncStarredMailToSheet({
+          organizationId: job.organizationId,
+          exportId: job.exportId,
+          starredOnly: job.plan.starredOnly,
+        });
         markTask(
           job,
           task.id,
           "done",
-          `Timer will backfill on next tick (${err instanceof Error ? err.message : "sync deferred"})`
+          synced.rowCount > 0
+            ? `Imported ${synced.rowCount} rows from ${synced.messagesFetched} starred emails`
+            : synced.messagesFetched > 0
+              ? `Fetched ${synced.messagesFetched} starred emails but extraction wrote 0 rows — check AI keys`
+              : "No starred Gmail found yet — star an email and wait for the next sync"
         );
+      } catch (err) {
+        markTask(
+          job,
+          task.id,
+          "failed",
+          err instanceof Error ? err.message : "Starred mail import failed"
+        );
+        job.status = "failed";
+        job.error =
+          err instanceof Error ? err.message : "Starred mail import failed";
+        await saveStudioJob(job);
+        return publicStudioJob(job);
       }
     } else if (task.id === "activate") {
       const graph = await ensureWorkflowGraph(job);

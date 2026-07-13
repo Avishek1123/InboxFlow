@@ -36,7 +36,9 @@ export async function prepareSheetExportData(params: {
 
   if (needsGmailSync && account?.status === "ACTIVE") {
     try {
-      const syncResult = await syncGmailAccount(account);
+      const syncResult = await syncGmailAccount(account, {
+        bypassLock: Boolean(params.forceGmailSync),
+      });
       gmailSynced = true;
       messagesFetched = syncResult.stats.messagesFetched;
     } catch (err) {
@@ -46,7 +48,10 @@ export async function prepareSheetExportData(params: {
 
   const extraction = await backfillMissingTableRows(
     params.extractionTableId,
-    params.organizationId
+    params.organizationId,
+    params.forceGmailSync
+      ? { maxRounds: 8, batchSize: 40 }
+      : undefined
   );
 
   return { gmailSynced, messagesFetched, extraction };
