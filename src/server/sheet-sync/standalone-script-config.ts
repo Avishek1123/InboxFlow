@@ -55,6 +55,7 @@ export async function buildStandaloneAppsScriptConfig(params: {
     geminiApiKey: resolveAppsScriptGeminiKey(),
     geminiModel: resolveAppsScriptGeminiModel(),
     triggerMinutes: params.triggerMinutes,
+    maxThreads: 50,
     tableId: params.tableId,
   });
 }

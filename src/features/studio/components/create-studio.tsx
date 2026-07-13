@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { IntegrationCredentialModal } from "@/features/automations/components/integration-credential-modal";
 import { SheetPermissionModal } from "@/features/google-sheets/components/sheet-permission-modal";
@@ -12,17 +12,33 @@ import {
   parseSheetSyncMinutesFromPrompt,
   promptRequestsSheetAutoUpdate,
 } from "@/lib/studio/parse-sheet-sync-minutes";
-import { StudioCinematicBuild } from "@/features/studio/components/studio-cinematic-build";
 
-type LaunchReady = {
-  status: "ready";
-  draft: {
+type JobTask = {
+  id: string;
+  label: string;
+  status: "pending" | "running" | "done" | "blocked" | "failed";
+  detail?: string;
+};
+
+type JobSnapshot = {
+  id: string;
+  status: "running" | "needs_permission" | "ready" | "failed";
+  tasks: JobTask[];
+  permission: {
+    integration: IntegrationRequirement;
+    reconnectUrl: string;
+    message: string;
+  } | null;
+  plan: {
     name: string;
     description: string;
+    sheetTitle: string;
+    syncMinutes: number;
+    starredOnly: boolean;
+    columnsFromUser: boolean;
+    columns: Array<{ key: string; label: string; hint?: string }>;
     triggerType: string;
-    validation: { valid: boolean; errors: string[] };
-    nodeCount: number;
-    sheetSyncMinutes?: number;
+    needsSheet: boolean;
   };
   sheet: {
     id: string;
@@ -30,32 +46,13 @@ type LaunchReady = {
     sheetTitle: string;
     extractionTableId: string;
     extractionTableName: string;
-    needsGooglePermissions?: boolean;
-    reconnectUrl?: string;
-    setupNote?: string;
     autoSyncOn?: boolean;
     syncMinutes?: number;
+    setupNote?: string;
   } | null;
-  automation: { id: string; name: string; status: string };
+  automation: { id: string; name: string; status: string } | null;
+  error: string | null;
 };
-
-type LaunchNeedsPermissions = {
-  status: "needs_permissions";
-  draft: {
-    name: string;
-    description: string;
-    triggerType: string;
-    validation: { valid: boolean; errors: string[] };
-    nodeCount: number;
-    sheetSyncMinutes?: number;
-  };
-  missingIntegrations: IntegrationRequirement[];
-  reconnectUrl: string;
-  sheet: null;
-  automation: null;
-};
-
-type LaunchResult = LaunchReady | LaunchNeedsPermissions;
 
 type RunStep = {
   id: string;
@@ -65,17 +62,10 @@ type RunStep = {
   errorMessage?: string | null;
 };
 
-type BuildStageKey =
-  | "prompt"
-  | "permissions"
-  | "sheet"
-  | "autosync"
-  | "ready";
-
 const EXAMPLES = [
-  "When I star a Gmail, extract the lead into a Google Sheet named Lead Tracker.",
-  "When a WhatsApp message arrives, save a summary to a Google Sheet.",
-  "On new Twilio SMS, extract the customer request into a Google Sheet.",
+  "Create a Google Sheet that collects Name and Phone Number from starred Gmail and auto-fetches every 1 minute.",
+  "When I star a Gmail, extract the lead into a Google Sheet named Lead Tracker with columns Name, Company, Email.",
+  "Build a sheet from starred emails, columns: Customer, Order ID, Amount — sync every 1 min.",
 ];
 
 const SYNC_INTERVAL_OPTIONS = [
@@ -88,37 +78,25 @@ const SYNC_INTERVAL_OPTIONS = [
   { value: 60, label: "Every 60 minutes" },
 ] as const;
 
-async function launchStudio(
-  prompt: string,
-  syncIntervalMinutes?: number
-): Promise<LaunchResult> {
-  const res = await fetch("/api/v1/studio/launch", {
+async function postJson<T>(url: string, body?: unknown): Promise<T> {
+  const res = await fetch(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      prompt,
-      activate: true,
-      ...(syncIntervalMinutes != null ? { syncIntervalMinutes } : {}),
-    }),
+    body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();
-  let json: { error?: { message?: string }; data?: LaunchResult };
+  let json: { error?: { message?: string }; data?: T };
   try {
     json = JSON.parse(text) as typeof json;
   } catch {
-    if (res.status === 504 || /gateway|timed out|timeout/i.test(text)) {
-      throw new Error(
-        "Build timed out. Try again — if it keeps happening, reconnect Gmail and use a shorter prompt."
-      );
-    }
     throw new Error(
       res.status >= 500
-        ? `Server error (${res.status}). Try again in a moment.`
-        : "Launch failed with an unexpected response."
+        ? `Server error (${res.status}). Try again.`
+        : "Unexpected response from server."
     );
   }
-  if (json.error) throw new Error(json.error.message || "Launch failed");
-  if (!json.data) throw new Error("Launch failed");
+  if (json.error) throw new Error(json.error.message || "Request failed");
+  if (!json.data) throw new Error("Request failed");
   return json.data;
 }
 
@@ -128,9 +106,8 @@ export function CreateStudio() {
   const [phase, setPhase] = useState<
     "idle" | "building" | "permissions" | "ready" | "testing"
   >("idle");
-  const [buildStage, setBuildStage] = useState<BuildStageKey>("prompt");
   const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<LaunchResult | null>(null);
+  const [job, setJob] = useState<JobSnapshot | null>(null);
   const [credentialModal, setCredentialModal] =
     useState<IntegrationRequirement | null>(null);
   const [sheetPermission, setSheetPermission] = useState<{
@@ -142,9 +119,6 @@ export function CreateStudio() {
   const [testSteps, setTestSteps] = useState<RunStep[]>([]);
   const [testStatus, setTestStatus] = useState<string | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
-  const [cinematicOpen, setCinematicOpen] = useState(false);
-  const [cinematicFinishing, setCinematicFinishing] = useState(false);
-  const pendingReadyRef = useRef<LaunchReady | null>(null);
 
   const asksForAutoUpdate = useMemo(
     () => promptRequestsSheetAutoUpdate(prompt),
@@ -157,95 +131,85 @@ export function CreateStudio() {
     if (fromPrompt != null) setSyncIntervalMinutes(fromPrompt);
   }, [prompt, asksForAutoUpdate]);
 
+  const handleJobSnapshot = useCallback((snap: JobSnapshot) => {
+    setJob(snap);
+    if (snap.status === "needs_permission" && snap.permission) {
+      setPhase("permissions");
+      if (snap.permission.integration === "GMAIL" && snap.sheet?.id) {
+        setSheetPermission({
+          exportId: snap.sheet.id,
+          reconnectUrl: snap.permission.reconnectUrl,
+        });
+        setCredentialModal(null);
+      } else {
+        setCredentialModal(snap.permission.integration);
+        setSheetPermission(null);
+      }
+      return;
+    }
+    if (snap.status === "ready") {
+      setPhase("ready");
+      setCredentialModal(null);
+      setSheetPermission(null);
+      return;
+    }
+    if (snap.status === "failed") {
+      setPhase("idle");
+      setError(snap.error || "Build failed");
+      return;
+    }
+    setPhase("building");
+  }, []);
+
+  const continueJob = useCallback(
+    async (jobId: string) => {
+      const snap = await postJson<JobSnapshot>(`/api/v1/studio/jobs/${jobId}`);
+      handleJobSnapshot(snap);
+    },
+    [handleJobSnapshot]
+  );
+
   const build = useCallback(async () => {
     setPhase("building");
-    setBuildStage("prompt");
     setError(null);
     setTestSteps([]);
     setTestStatus(null);
     setTestError(null);
-    setResult(null);
-    pendingReadyRef.current = null;
-    setCinematicFinishing(false);
-    setCinematicOpen(true);
-
-    const timers = [
-      window.setTimeout(() => setBuildStage("permissions"), 900),
-      window.setTimeout(() => setBuildStage("sheet"), 2200),
-      window.setTimeout(() => setBuildStage("autosync"), 4000),
-    ];
+    setJob(null);
+    setSheetPermission(null);
+    setCredentialModal(null);
 
     try {
-      const data = await launchStudio(
-        prompt.trim(),
-        asksForAutoUpdate ? syncIntervalMinutes : undefined
-      );
-      timers.forEach(clearTimeout);
-
-      if (data.status === "needs_permissions") {
-        setCinematicOpen(false);
-        setCinematicFinishing(false);
-        setResult(data);
-        setBuildStage("permissions");
-        setPhase("permissions");
-        setCredentialModal(data.missingIntegrations[0] ?? "GMAIL");
-        return;
-      }
-
-      setBuildStage("ready");
-      pendingReadyRef.current = data;
-      setCinematicFinishing(true);
+      const snap = await postJson<JobSnapshot>("/api/v1/studio/jobs", {
+        prompt: prompt.trim(),
+        ...(asksForAutoUpdate ? { syncIntervalMinutes } : {}),
+      });
+      handleJobSnapshot(snap);
     } catch (e) {
-      timers.forEach(clearTimeout);
-      setCinematicOpen(false);
-      setCinematicFinishing(false);
-      pendingReadyRef.current = null;
       setError(e instanceof Error ? e.message : "Something went wrong");
       setPhase("idle");
-      setBuildStage("prompt");
     }
-  }, [prompt, syncIntervalMinutes, asksForAutoUpdate]);
-
-  const finishCinematic = useCallback(() => {
-    const data = pendingReadyRef.current;
-    if (!data) {
-      setCinematicOpen(false);
-      setCinematicFinishing(false);
-      return;
-    }
-    pendingReadyRef.current = null;
-    setResult(data);
-    setCinematicOpen(false);
-    setCinematicFinishing(false);
-    setBuildStage("ready");
-    setPhase("ready");
-
-    // End-to-end: finish auto-sync in-app (never require sheet menu).
-    if (data.sheet && !data.sheet.autoSyncOn) {
-      setSheetPermission({
-        exportId: data.sheet.id,
-        reconnectUrl:
-          data.sheet.reconnectUrl ||
-          `/api/v1/integrations/gmail/connect?reconnect=1&popup=1&sheetExportId=${data.sheet.id}`,
-      });
-    }
-  }, []);
+  }, [prompt, syncIntervalMinutes, asksForAutoUpdate, handleJobSnapshot]);
 
   const resumeAfterConnect = useCallback(async () => {
     setCredentialModal(null);
-    setBuildStage("sheet");
     await refreshIntegrations();
-    await build();
-  }, [build, refreshIntegrations]);
+    if (!job?.id) {
+      await build();
+      return;
+    }
+    setPhase("building");
+    await continueJob(job.id);
+  }, [build, continueJob, job?.id, refreshIntegrations]);
 
   async function runTest() {
-    if (!result || result.status !== "ready") return;
+    if (!job?.automation?.id) return;
     setPhase("testing");
     setTestError(null);
     setTestStatus("Starting test run…");
     setTestSteps([]);
     try {
-      const { executionId } = await automationClient.execute(result.automation.id, {
+      const { executionId } = await automationClient.execute(job.automation.id, {
         source: "studio_test",
         body: "Studio test run",
       });
@@ -253,7 +217,7 @@ export function CreateStudio() {
 
       for (let i = 0; i < 12; i++) {
         await new Promise((r) => setTimeout(r, 1500));
-        const { items } = await automationClient.executions(result.automation.id);
+        const { items } = await automationClient.executions(job.automation!.id);
         const latest = (
           items as Array<{
             id: string;
@@ -265,7 +229,6 @@ export function CreateStudio() {
 
         if (!latest) continue;
         const row = latest as {
-          id: string;
           status: string;
           errorMessage?: string | null;
           steps?: RunStep[];
@@ -276,6 +239,7 @@ export function CreateStudio() {
         if (
           row.status === "SUCCESS" ||
           row.status === "FAILED" ||
+          row.status === "COMPLETED" ||
           row.status === "WAITING_APPROVAL"
         ) {
           break;
@@ -283,50 +247,229 @@ export function CreateStudio() {
       }
     } catch (e) {
       setTestError(e instanceof Error ? e.message : "Test failed");
-      setTestStatus("FAILED");
     } finally {
       setPhase("ready");
     }
   }
 
-  useEffect(() => {
-    if (phase !== "permissions" || !result || result.status !== "needs_permissions") {
-      return;
-    }
-    const missing = result.missingIntegrations;
-    const gmailOk =
-      integrationStatus.gmail.connected &&
-      !integrationStatus.gmail.needsReconnect;
-    const stillMissing = missing.filter((m) => {
-      if (m === "GMAIL") return !gmailOk;
-      if (m === "WHATSAPP") return !integrationStatus.whatsapp.connected;
-      if (m === "TWILIO") return !integrationStatus.twilio.connected;
-      return true;
-    });
-    if (stillMissing.length === 0) {
-      void build();
-    }
-  }, [phase, result, integrationStatus, build]);
-
-  const ready = result?.status === "ready" ? result : null;
-  const needsPerms =
-    result?.status === "needs_permissions" ? result : null;
+  const ready = job?.status === "ready";
 
   return (
-    <>
-      <StudioCinematicBuild
-        open={cinematicOpen}
-        stage={buildStage}
-        promptSnippet={prompt}
-        finishing={cinematicFinishing}
-        onComplete={finishCinematic}
-      />
+    <div className="mx-auto w-full max-w-3xl space-y-6 pb-16">
+      <header>
+        <h1 className="text-2xl font-semibold tracking-tight">Ask AI</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Describe the product. AI plans tasks, asks for Google only when needed,
+          then delivers a sheet that auto-fetches on its own.
+        </p>
+      </header>
+
+      <section className="space-y-3 rounded-2xl border border-border bg-background p-5">
+        <label className="block text-sm font-medium">Your prompt</label>
+        <textarea
+          value={prompt}
+          onChange={(e) => setPrompt(e.target.value)}
+          rows={5}
+          className="w-full rounded-xl border border-border bg-muted/30 px-3 py-2.5 text-sm outline-none focus:ring-1 focus:ring-ring"
+          placeholder={EXAMPLES[0]}
+        />
+        <div className="flex flex-wrap gap-2">
+          {EXAMPLES.map((ex) => (
+            <button
+              key={ex}
+              type="button"
+              onClick={() => setPrompt(ex)}
+              className="rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground hover:bg-muted"
+            >
+              {ex.slice(0, 48)}…
+            </button>
+          ))}
+        </div>
+
+        {asksForAutoUpdate && (
+          <label className="block text-sm">
+            <span className="font-medium">Auto-fetch interval</span>
+            <select
+              value={syncIntervalMinutes}
+              onChange={(e) => setSyncIntervalMinutes(Number(e.target.value))}
+              className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
+            >
+              {SYNC_INTERVAL_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+
+        <button
+          type="button"
+          disabled={phase === "building" || prompt.trim().length < 8}
+          onClick={() => void build()}
+          className="w-full rounded-xl bg-foreground py-3 text-sm font-semibold text-background hover:opacity-90 disabled:opacity-50"
+        >
+          {phase === "building" ? "Building product…" : "Build my product"}
+        </button>
+        {error && (
+          <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
+            {error}
+          </p>
+        )}
+      </section>
+
+      {job && (
+        <section className="space-y-3 rounded-2xl border border-border bg-background p-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              AI task list
+            </p>
+            <h2 className="mt-1 text-lg font-semibold">{job.plan.name}</h2>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {job.plan.description}
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Sheet: <strong>{job.plan.sheetTitle}</strong>
+              {job.plan.starredOnly ? " · starred Gmail only" : ""}
+              {` · every ${job.plan.syncMinutes} min`}
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {job.plan.columnsFromUser ? "Your headings: " : "AI headings: "}
+              {job.plan.columns.map((c) => c.label).join(", ")}
+            </p>
+          </div>
+
+          <ol className="space-y-2">
+            {job.tasks.map((t, i) => (
+              <li
+                key={t.id}
+                className={cn(
+                  "flex items-start gap-3 rounded-xl border px-3 py-2.5 text-sm",
+                  t.status === "done" && "border-emerald-500/40 bg-emerald-500/5",
+                  t.status === "running" && "border-blue-500/40 bg-blue-500/5",
+                  t.status === "blocked" && "border-amber-500/40 bg-amber-500/5",
+                  t.status === "failed" && "border-red-500/40 bg-red-500/5",
+                  t.status === "pending" && "border-border"
+                )}
+              >
+                <span className="mt-0.5 w-5 shrink-0 text-center font-mono text-xs text-muted-foreground">
+                  {t.status === "done"
+                    ? "✓"
+                    : t.status === "running"
+                      ? "…"
+                      : t.status === "blocked"
+                        ? "!"
+                        : t.status === "failed"
+                          ? "×"
+                          : i + 1}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium">{t.label}</p>
+                  {t.detail && (
+                    <p className="mt-0.5 text-xs text-muted-foreground break-all">
+                      {t.detail}
+                    </p>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ol>
+        </section>
+      )}
+
+      {ready && job && (
+        <section className="space-y-4 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-5">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
+              Your product is ready
+            </p>
+            <h2 className="mt-1 text-xl font-semibold">
+              {job.automation?.name || job.plan.name}
+            </h2>
+            <p className="mt-2 text-xs text-muted-foreground">
+              {job.automation?.status ?? "ACTIVE"}
+              {job.sheet?.autoSyncOn
+                ? ` · auto-fetch every ${job.sheet.syncMinutes ?? job.plan.syncMinutes} min`
+                : ""}
+              {" · "}
+              no further setup needed
+            </p>
+          </div>
+
+          {job.sheet?.spreadsheetUrl && (
+            <div className="rounded-xl border border-border bg-background p-4">
+              <p className="text-xs font-semibold uppercase text-muted-foreground">
+                Google Sheet
+              </p>
+              <a
+                href={job.sheet.spreadsheetUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="mt-2 block break-all text-sm font-medium text-emerald-700 underline dark:text-emerald-300"
+              >
+                {job.sheet.spreadsheetUrl}
+              </a>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Starred Gmail → Gemini AI → this sheet, every{" "}
+                {job.sheet.syncMinutes ?? job.plan.syncMinutes} min inside Google.
+                You don’t need to keep InboxFlow open or change the sheet.
+              </p>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={phase === "testing"}
+              onClick={() => void runTest()}
+              className="rounded-xl bg-foreground px-4 py-2.5 text-sm font-semibold text-background hover:opacity-90 disabled:opacity-50"
+            >
+              {phase === "testing" ? "Testing…" : "Test run"}
+            </button>
+            {job.automation && (
+              <Link
+                href={`/automations/${job.automation.id}`}
+                className="rounded-xl border border-border px-4 py-2.5 text-sm font-medium hover:bg-muted"
+              >
+                Open workflow
+              </Link>
+            )}
+            {job.sheet?.spreadsheetUrl && (
+              <a
+                href={job.sheet.spreadsheetUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded-xl border border-border px-4 py-2.5 text-sm font-medium hover:bg-muted"
+              >
+                Open sheet
+              </a>
+            )}
+          </div>
+
+          {(testStatus || testSteps.length > 0 || testError) && (
+            <div className="rounded-xl border border-border bg-background p-4">
+              <p className="text-xs font-semibold uppercase text-muted-foreground">
+                Test visualization
+              </p>
+              <p className="mt-1 text-sm">
+                Status: <span className="font-semibold">{testStatus ?? "—"}</span>
+              </p>
+              {testError && (
+                <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
+                  {testError}
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
       <IntegrationCredentialModal
         open={credentialModal !== null}
         integration={credentialModal ?? "GMAIL"}
         node={null}
         gmailReconnectUrl={
-          needsPerms?.reconnectUrl ||
+          job?.permission?.reconnectUrl ||
           integrationStatus.gmail.reconnectUrl ||
           "/api/v1/integrations/gmail/connect?reconnect=1"
         }
@@ -335,282 +478,18 @@ export function CreateStudio() {
         onConnected={() => void resumeAfterConnect()}
         onCancel={() => setCredentialModal(null)}
       />
+
       {sheetPermission && (
         <SheetPermissionModal
           exportId={sheetPermission.exportId}
           reconnectUrl={sheetPermission.reconnectUrl}
-          onDone={(message) => {
+          onDone={() => {
             setSheetPermission(null);
-            setError(null);
-            setResult((prev) =>
-              prev && prev.status === "ready"
-                ? {
-                    ...prev,
-                    sheet: prev.sheet
-                      ? {
-                          ...prev.sheet,
-                          needsGooglePermissions: false,
-                          autoSyncOn: true,
-                          setupNote: message,
-                        }
-                      : prev.sheet,
-                  }
-                : prev
-            );
+            if (job?.id) void continueJob(job.id);
           }}
           onCancel={() => setSheetPermission(null)}
         />
       )}
-
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-8">
-        <header className="space-y-2 text-center md:text-left">
-          <p className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-            Ask AI
-          </p>
-          <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">
-            Describe what you want. Get a ready product.
-          </h1>
-          <p className="max-w-2xl text-sm text-muted-foreground md:text-base">
-            Permission → sheet → ready link. Mention auto-update or sync in your
-            prompt only if you want to choose how often the sheet refreshes.
-          </p>
-        </header>
-
-        <section
-          className={cn(
-            "rounded-2xl border border-border bg-card p-4 shadow-sm transition-all duration-500 md:p-6",
-            cinematicOpen && "pointer-events-none scale-[0.99] opacity-40"
-          )}
-        >
-          <label className="block text-sm font-medium">Your prompt</label>
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            rows={5}
-            disabled={phase === "building"}
-            className="mt-2 w-full resize-y rounded-xl border border-border bg-background px-4 py-3 text-sm leading-relaxed outline-none ring-offset-background focus:ring-2 focus:ring-primary/30 disabled:opacity-60"
-            placeholder="e.g. Star a Gmail → put leads in a Google Sheet named Lead Tracker…"
-          />
-          <div className="mt-3 flex flex-wrap gap-2">
-            {EXAMPLES.map((ex) => (
-              <button
-                key={ex}
-                type="button"
-                disabled={phase === "building"}
-                onClick={() => setPrompt(ex)}
-                className="rounded-full border border-border px-3 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-50"
-              >
-                {ex.slice(0, 48)}…
-              </button>
-            ))}
-          </div>
-
-          {asksForAutoUpdate && (
-            <div className="mt-5">
-              <label className="block text-sm font-medium">
-                How often should the sheet auto-update?
-              </label>
-              <p className="mt-1 text-[11px] text-muted-foreground">
-                You asked for auto-update — pick the refresh interval.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {SYNC_INTERVAL_OPTIONS.map((opt) => (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    disabled={phase === "building"}
-                    onClick={() => setSyncIntervalMinutes(opt.value)}
-                    className={cn(
-                      "rounded-lg border px-3 py-2 text-xs font-medium transition-colors disabled:opacity-50",
-                      syncIntervalMinutes === opt.value
-                        ? "border-primary bg-primary/10 text-foreground"
-                        : "border-border text-muted-foreground hover:bg-muted hover:text-foreground"
-                    )}
-                  >
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-          )}
-
-          <button
-            type="button"
-            disabled={phase === "building" || prompt.trim().length < 8}
-            onClick={() => void build()}
-            className="mt-4 w-full rounded-xl bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground transition-transform hover:opacity-90 active:scale-[0.99] disabled:opacity-50"
-          >
-            {phase === "building" || cinematicOpen
-              ? "Building your product…"
-              : "Build my product"}
-          </button>
-          {error && (
-            <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">
-              {error}
-            </p>
-          )}
-        </section>
-
-        {needsPerms && (
-          <section className="rounded-2xl border border-amber-500/40 bg-amber-500/5 p-5">
-            <h2 className="text-lg font-semibold">Permission needed</h2>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Draft ready: <strong>{needsPerms.draft.name}</strong>. Connect once —
-              that step will tick ✓ and we continue creating your sheet automatically.
-            </p>
-            <ul className="mt-4 space-y-2">
-              {needsPerms.missingIntegrations.map((m) => (
-                <li key={m}>
-                  <button
-                    type="button"
-                    onClick={() => setCredentialModal(m)}
-                    className="w-full rounded-xl border border-border bg-background px-4 py-3 text-left text-sm font-medium hover:bg-muted"
-                  >
-                    {m === "GMAIL"
-                      ? "Connect Gmail + Google Sheets"
-                      : m === "TWILIO"
-                        ? "Connect Twilio"
-                        : "Connect WhatsApp (Meta)"}
-                  </button>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {ready && (
-          <section className="studio-ready-reveal space-y-4 rounded-2xl border border-emerald-500/40 bg-emerald-500/5 p-5">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700 dark:text-emerald-300">
-                Your product is ready
-              </p>
-              <h2 className="mt-1 text-xl font-semibold">{ready.automation.name}</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {ready.draft.description}
-              </p>
-              <p className="mt-2 text-xs text-muted-foreground">
-                {ready.automation.status}
-                {ready.sheet
-                  ? ready.sheet.autoSyncOn
-                    ? ` · sheet sync every ${ready.sheet.syncMinutes ?? syncIntervalMinutes} min`
-                    : " · sheet auto-sync needs setup"
-                  : ""}
-                {" · "}
-                {ready.draft.nodeCount} steps
-              </p>
-            </div>
-
-            {ready.sheet?.spreadsheetUrl && (
-              <div className="rounded-xl border border-border bg-background p-4">
-                <p className="text-xs font-semibold uppercase text-muted-foreground">
-                  Final Google Sheet link
-                </p>
-                <a
-                  href={ready.sheet.spreadsheetUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="mt-2 block break-all text-sm font-medium text-emerald-700 underline dark:text-emerald-300"
-                >
-                  {ready.sheet.spreadsheetUrl}
-                </a>
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                  {ready.sheet.autoSyncOn
-                    ? `Live: every ${ready.sheet.syncMinutes ?? syncIntervalMinutes} min the sheet timer reads starred Gmail, structures with AI, and writes rows. You don’t need to open the sheet or keep InboxFlow running.`
-                    : asksForAutoUpdate
-                      ? `Almost live — finish the Google approval popup so auto-sync turns on (every ${ready.sheet.syncMinutes ?? syncIntervalMinutes} min). No sheet menu needed.`
-                      : "Your sheet is ready. Mention auto-update in a new prompt if you want a refresh schedule."}
-                  {ready.sheet.setupNote ? ` ${ready.sheet.setupNote}` : ""}
-                </p>
-                {ready.sheet.needsGooglePermissions && !sheetPermission && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setSheetPermission({
-                        exportId: ready.sheet!.id,
-                        reconnectUrl:
-                          ready.sheet!.reconnectUrl ||
-                          `/api/v1/integrations/gmail/connect?reconnect=1&popup=1&sheetExportId=${ready.sheet!.id}`,
-                      })
-                    }
-                    className="mt-3 rounded-lg bg-[#0F9D58] px-3 py-2 text-xs font-semibold text-white hover:opacity-90"
-                  >
-                    Finish Google approval
-                  </button>
-                )}
-              </div>
-            )}
-
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={phase === "testing"}
-                onClick={() => void runTest()}
-                className="rounded-xl bg-foreground px-4 py-2.5 text-sm font-semibold text-background hover:opacity-90 disabled:opacity-50"
-              >
-                {phase === "testing" ? "Testing…" : "Test run"}
-              </button>
-              <Link
-                href={`/automations/${ready.automation.id}`}
-                className="rounded-xl border border-border px-4 py-2.5 text-sm font-medium hover:bg-muted"
-              >
-                Open workflow
-              </Link>
-              {ready.sheet?.spreadsheetUrl && (
-                <a
-                  href={ready.sheet.spreadsheetUrl}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="rounded-xl border border-border px-4 py-2.5 text-sm font-medium hover:bg-muted"
-                >
-                  Open sheet
-                </a>
-              )}
-            </div>
-
-            {(testStatus || testSteps.length > 0 || testError) && (
-              <div className="rounded-xl border border-border bg-background p-4">
-                <p className="text-xs font-semibold uppercase text-muted-foreground">
-                  Test visualization
-                </p>
-                <p className="mt-1 text-sm">
-                  Status:{" "}
-                  <span className="font-semibold">{testStatus ?? "—"}</span>
-                </p>
-                {testError && (
-                  <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">
-                    {testError}
-                  </p>
-                )}
-                {testSteps.length > 0 && (
-                  <ol className="mt-3 space-y-2">
-                    {testSteps.map((step, i) => (
-                      <li
-                        key={step.id}
-                        className="flex items-start gap-2 rounded-lg border border-border/60 px-3 py-2 text-xs"
-                      >
-                        <span className="font-mono text-muted-foreground">
-                          {i + 1}.
-                        </span>
-                        <div className="min-w-0 flex-1">
-                          <p className="font-medium">
-                            {step.label || step.nodeType}
-                          </p>
-                          <p className="text-muted-foreground">{step.status}</p>
-                          {step.errorMessage && (
-                            <p className="mt-0.5 text-amber-700 dark:text-amber-300">
-                              {step.errorMessage}
-                            </p>
-                          )}
-                        </div>
-                      </li>
-                    ))}
-                  </ol>
-                )}
-              </div>
-            )}
-          </section>
-        )}
-      </div>
-    </>
+    </div>
   );
 }

@@ -248,12 +248,52 @@ function rowFromMessage_(message, extracted) {
 }
 
 function collectStarredMessages_() {
-  var threads = GmailApp.search('is:starred', 0, INBOXFLOW_CONFIG.MAX_THREADS);
+  // Paginate Gmail search so we get ALL starred threads, not just the first page.
   var messages = [];
-  for (var t = 0; t < threads.length; t++) {
-    var threadMsgs = threads[t].getMessages();
-    for (var m = 0; m < threadMsgs.length; m++) {
-      messages.push(threadMsgs[m]);
+  var seen = {};
+  var start = 0;
+  var pageSize = 50;
+  var maxPages = 40; // up to ~2000 starred threads
+  for (var page = 0; page < maxPages; page++) {
+    var threads = GmailApp.search('is:starred', start, pageSize);
+    if (!threads || threads.length === 0) break;
+    for (var t = 0; t < threads.length; t++) {
+      var threadMsgs = threads[t].getMessages();
+      for (var m = 0; m < threadMsgs.length; m++) {
+        var msg = threadMsgs[m];
+        var id = msg.getId();
+        if (seen[id]) continue;
+        // Prefer the starred message in the thread when possible
+        try {
+          if (!msg.isStarred()) continue;
+        } catch (eStar) {
+          /* older API — keep message */
+        }
+        seen[id] = true;
+        messages.push(msg);
+      }
+    }
+    if (threads.length < pageSize) break;
+    start += pageSize;
+  }
+  // Fallback: if isStarred filter yielded nothing, include all messages from starred threads
+  if (messages.length === 0) {
+    start = 0;
+    for (var page2 = 0; page2 < maxPages; page2++) {
+      var threads2 = GmailApp.search('is:starred', start, pageSize);
+      if (!threads2 || threads2.length === 0) break;
+      for (var t2 = 0; t2 < threads2.length; t2++) {
+        var threadMsgs2 = threads2[t2].getMessages();
+        for (var m2 = 0; m2 < threadMsgs2.length; m2++) {
+          var msg2 = threadMsgs2[m2];
+          var id2 = msg2.getId();
+          if (seen[id2]) continue;
+          seen[id2] = true;
+          messages.push(msg2);
+        }
+      }
+      if (threads2.length < pageSize) break;
+      start += pageSize;
     }
   }
   return messages;
