@@ -16,7 +16,7 @@ export async function GET(_request: Request, { params }: Params) {
   try {
     const { organization } = await requireOrganization();
     const { id } = await params;
-    const job = getStudioJob(id);
+    const job = await getStudioJob(id);
     if (!job || job.organizationId !== organization.id) {
       return apiError("NOT_FOUND", "Job not found", 404);
     }
@@ -30,24 +30,44 @@ export async function GET(_request: Request, { params }: Params) {
   }
 }
 
-/** Resume after permissions, or advance the next task. */
+/** Resume after permissions, or advance the next single task. */
 export async function POST(request: Request, { params }: Params) {
   try {
     const { organization } = await requireOrganization();
     const { id } = await params;
-    const job = getStudioJob(id);
+    const job = await getStudioJob(id);
     if (!job || job.organizationId !== organization.id) {
-      return apiError("NOT_FOUND", "Job not found", 404);
+      return apiError("NOT_FOUND", "Job not found. Start the build again.", 404);
     }
 
-    job.tasks = job.tasks.map((t) =>
-      t.status === "blocked" ? { ...t, status: "pending", detail: undefined } : t
-    );
-    job.status = "running";
-    job.permission = undefined;
-    const nextIdx = job.tasks.findIndex((t) => t.status !== "done");
-    if (nextIdx >= 0) job.cursor = nextIdx;
-    saveStudioJob(job);
+    let body: { timerInstalled?: boolean } = {};
+    try {
+      const text = await request.text();
+      if (text) body = JSON.parse(text) as typeof body;
+    } catch {
+      /* empty body is fine */
+    }
+
+    // Sheet permission modal may have already turned the timer on.
+    if (body.timerInstalled) {
+      job.autoSyncOn = true;
+      await saveStudioJob(job);
+    } else if (job.exportId && !job.autoSyncOn) {
+      try {
+        const { sheetExportRepository } = await import(
+          "@/server/repositories/sheet-export.repository"
+        );
+        const row = (await sheetExportRepository.list(organization.id)).find(
+          (e) => e.id === job.exportId
+        );
+        if (row?.appsScriptId) {
+          job.appsScriptId = row.appsScriptId;
+          await saveStudioJob(job);
+        }
+      } catch {
+        /* ignore */
+      }
+    }
 
     const requestOrigin = new URL(request.url).origin;
     const progressed = await continueStudioJob({

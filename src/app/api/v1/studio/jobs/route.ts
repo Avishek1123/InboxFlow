@@ -2,7 +2,7 @@ import { z } from "zod";
 import { apiError, apiSuccess } from "@/lib/api-response";
 import { requireOrganization } from "@/server/organizations/require-organization";
 import { planStudioProduct } from "@/server/studio/plan-product";
-import { createStudioJob, publicStudioJob } from "@/server/studio/job-store";
+import { createStudioJob } from "@/server/studio/job-store";
 import { continueStudioJob } from "@/server/studio/run-job-step";
 
 export const runtime = "nodejs";
@@ -13,7 +13,7 @@ const createSchema = z.object({
   syncIntervalMinutes: z.number().int().min(1).max(60).optional(),
 });
 
-/** Create a studio job: plan tasks from the prompt, then start executing. */
+/** Create a studio job: plan tasks, then run the first executable step. */
 export async function POST(request: Request) {
   try {
     const { organization, user } = await requireOrganization();
@@ -28,7 +28,7 @@ export async function POST(request: Request) {
       syncIntervalMinutes: parsed.data.syncIntervalMinutes,
     });
 
-    const job = createStudioJob({
+    const job = await createStudioJob({
       organizationId: organization.id,
       userId: user.id,
       prompt: parsed.data.prompt,

@@ -1,7 +1,14 @@
+import { promises as fs } from "fs";
+import path from "path";
 import type { StudioProductPlan, StudioTaskId } from "@/server/studio/plan-product";
 import type { WorkflowGraph } from "@/types/automation";
 
-export type StudioJobTaskStatus = "pending" | "running" | "done" | "blocked" | "failed";
+export type StudioJobTaskStatus =
+  | "pending"
+  | "running"
+  | "done"
+  | "blocked"
+  | "failed";
 
 export type StudioJobTask = {
   id: StudioTaskId;
@@ -45,30 +52,64 @@ const TASK_LABELS: Record<StudioTaskId, string> = {
   create_table: "Create data table with headings",
   create_sheet: "Create Google Sheet",
   install_script: "Install starred-mail → AI script",
-  enable_autosync: "Enable 1-min auto-sync timer",
+  enable_autosync: "Enable auto-sync timer",
   backfill: "Import all starred emails",
   activate: "Activate product",
 };
 
 type GlobalJobs = { __inboxflowStudioJobs?: Map<string, StudioJob> };
 
-function store(): Map<string, StudioJob> {
+function memoryStore(): Map<string, StudioJob> {
   const g = globalThis as unknown as GlobalJobs;
   if (!g.__inboxflowStudioJobs) g.__inboxflowStudioJobs = new Map();
   return g.__inboxflowStudioJobs;
 }
 
-export function createStudioJob(params: {
+function jobsDir(): string {
+  return path.join(process.cwd(), ".data", "studio-jobs");
+}
+
+async function ensureJobsDir() {
+  await fs.mkdir(jobsDir(), { recursive: true });
+}
+
+async function persistJob(job: StudioJob) {
+  memoryStore().set(job.id, job);
+  try {
+    await ensureJobsDir();
+    await fs.writeFile(
+      path.join(jobsDir(), `${job.id}.json`),
+      JSON.stringify(job),
+      "utf8"
+    );
+  } catch (err) {
+    console.warn("[studio-job] persist failed:", err);
+  }
+}
+
+async function loadJobFromDisk(id: string): Promise<StudioJob | null> {
+  try {
+    const raw = await fs.readFile(
+      path.join(jobsDir(), `${id}.json`),
+      "utf8"
+    );
+    return JSON.parse(raw) as StudioJob;
+  } catch {
+    return null;
+  }
+}
+
+export async function createStudioJob(params: {
   organizationId: string;
   userId: string;
   prompt: string;
   plan: StudioProductPlan;
-}): StudioJob {
+}): Promise<StudioJob> {
   const id = `job_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-  const tasks: StudioJobTask[] = params.plan.tasks.map((tid, i) => ({
+  const tasks: StudioJobTask[] = params.plan.tasks.map((tid) => ({
     id: tid,
     label: TASK_LABELS[tid],
-    status: i === 0 ? "done" : "pending",
+    status: tid === "plan" ? "done" : "pending",
     detail:
       tid === "plan"
         ? params.plan.columnsFromUser
@@ -77,10 +118,7 @@ export function createStudioJob(params: {
         : undefined,
   }));
 
-  // plan task already completed by planStudioProduct
-  const planIdx = tasks.findIndex((t) => t.id === "plan");
-  if (planIdx >= 0) tasks[planIdx]!.status = "done";
-
+  const planIdx = params.plan.tasks.indexOf("plan");
   const job: StudioJob = {
     id,
     organizationId: params.organizationId,
@@ -88,30 +126,43 @@ export function createStudioJob(params: {
     prompt: params.prompt,
     plan: params.plan,
     tasks,
-    cursor: Math.max(0, params.plan.tasks.indexOf("plan") + 1),
+    cursor: Math.max(0, planIdx + 1),
     status: "running",
     createdAt: Date.now(),
     updatedAt: Date.now(),
   };
-  store().set(id, job);
+  await persistJob(job);
   return job;
 }
 
-export function getStudioJob(id: string): StudioJob | null {
-  return store().get(id) ?? null;
+export async function getStudioJob(id: string): Promise<StudioJob | null> {
+  const mem = memoryStore().get(id);
+  if (mem) return mem;
+  const disk = await loadJobFromDisk(id);
+  if (disk) {
+    memoryStore().set(id, disk);
+    return disk;
+  }
+  return null;
 }
 
-export function saveStudioJob(job: StudioJob): StudioJob {
+export async function saveStudioJob(job: StudioJob): Promise<StudioJob> {
   job.updatedAt = Date.now();
-  store().set(job.id, job);
+  await persistJob(job);
   return job;
 }
 
 export function publicStudioJob(job: StudioJob) {
+  const doneCount = job.tasks.filter((t) => t.status === "done").length;
   return {
     id: job.id,
     status: job.status,
     cursor: job.cursor,
+    progress: {
+      done: doneCount,
+      total: job.tasks.length,
+      percent: Math.round((doneCount / Math.max(1, job.tasks.length)) * 100),
+    },
     tasks: job.tasks,
     permission: job.permission ?? null,
     plan: {

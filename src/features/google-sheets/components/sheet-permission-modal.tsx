@@ -8,7 +8,7 @@ type Props = {
   reconnectUrl: string;
   /** Auto-start Google OAuth + install (end-to-end, no sheet menu). */
   autoStart?: boolean;
-  onDone: (message: string) => void;
+  onDone: (result: { installed: boolean; message: string }) => void;
   onCancel: () => void;
 };
 
@@ -36,10 +36,12 @@ export function SheetPermissionModal({
         repairOnly: false,
       });
       if (first.triggerInstalled) {
-        onDone(
-          first.message ||
-            "Auto-sync is on. Starred emails will update your sheet every minute."
-        );
+        onDone({
+          installed: true,
+          message:
+            first.message ||
+            "Auto-sync is on. Starred emails will update your sheet every minute.",
+        });
         return;
       }
 
@@ -50,10 +52,12 @@ export function SheetPermissionModal({
           repairOnly: true,
         });
         if (res.triggerInstalled) {
-          onDone(
-            res.message ||
-              "Auto-sync enabled. Your product will update the sheet on its own."
-          );
+          onDone({
+            installed: true,
+            message:
+              res.message ||
+              "Auto-sync enabled. Your product will update the sheet on its own.",
+          });
           return;
         }
         await new Promise((r) => setTimeout(r, 4000));
@@ -66,10 +70,12 @@ export function SheetPermissionModal({
         return;
       }
 
-      onDone(
-        first.message ||
-          "Setup saved. Click Continue with Google once more if the timer is not on yet."
-      );
+      onDone({
+        installed: false,
+        message:
+          first.message ||
+          "Setup saved. Click Continue with Google once more if the timer is not on yet.",
+      });
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Setup failed");
     } finally {

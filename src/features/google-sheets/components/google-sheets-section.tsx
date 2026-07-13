@@ -574,9 +574,9 @@ export function GoogleSheetsSection() {
         <SheetPermissionModal
           exportId={permissionModal.exportId}
           reconnectUrl={permissionModal.reconnectUrl}
-          onDone={(message) => {
+          onDone={(result) => {
             setPermissionModal(null);
-            setSuccess(message);
+            setSuccess(result.message);
             void load();
           }}
           onCancel={() => setPermissionModal(null)}

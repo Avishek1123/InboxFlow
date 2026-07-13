@@ -317,6 +317,21 @@ html {
   }
 }
 
+@keyframes studio-task-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.studio-task-row {
+  animation: studio-task-in 0.45s ease-out both;
+}
+
 .studio-ready-reveal {
   animation: studio-ready-reveal 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
 }

@@ -1,13 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { IntegrationCredentialModal } from "@/features/automations/components/integration-credential-modal";
 import { SheetPermissionModal } from "@/features/google-sheets/components/sheet-permission-modal";
+import { StudioTaskProgress } from "@/features/studio/components/studio-task-progress";
 import { useIntegrationStatus } from "@/features/automations/hooks/use-integration-status";
 import type { IntegrationRequirement } from "@/lib/automation/definitions";
 import { automationClient } from "@/services/automation-client";
-import { cn } from "@/lib/utils";
 import {
   parseSheetSyncMinutesFromPrompt,
   promptRequestsSheetAutoUpdate,
@@ -23,6 +23,7 @@ type JobTask = {
 type JobSnapshot = {
   id: string;
   status: "running" | "needs_permission" | "ready" | "failed";
+  progress?: { done: number; total: number; percent: number };
   tasks: JobTask[];
   permission: {
     integration: IntegrationRequirement;
@@ -100,6 +101,10 @@ async function postJson<T>(url: string, body?: unknown): Promise<T> {
   return json.data;
 }
 
+function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 export function CreateStudio() {
   const [prompt, setPrompt] = useState(EXAMPLES[0]!);
   const [syncIntervalMinutes, setSyncIntervalMinutes] = useState(1);
@@ -120,6 +125,11 @@ export function CreateStudio() {
   const [testStatus, setTestStatus] = useState<string | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
 
+  const jobIdRef = useRef<string | null>(null);
+  const advancingRef = useRef(false);
+  const cancelledRef = useRef(false);
+  const timerInstalledRef = useRef(false);
+
   const asksForAutoUpdate = useMemo(
     () => promptRequestsSheetAutoUpdate(prompt),
     [prompt]
@@ -131,42 +141,83 @@ export function CreateStudio() {
     if (fromPrompt != null) setSyncIntervalMinutes(fromPrompt);
   }, [prompt, asksForAutoUpdate]);
 
-  const handleJobSnapshot = useCallback((snap: JobSnapshot) => {
-    setJob(snap);
-    if (snap.status === "needs_permission" && snap.permission) {
-      setPhase("permissions");
-      if (snap.permission.integration === "GMAIL" && snap.sheet?.id) {
-        setSheetPermission({
-          exportId: snap.sheet.id,
-          reconnectUrl: snap.permission.reconnectUrl,
-        });
-        setCredentialModal(null);
-      } else {
-        setCredentialModal(snap.permission.integration);
-        setSheetPermission(null);
-      }
-      return;
-    }
-    if (snap.status === "ready") {
-      setPhase("ready");
+  const applyPermissionUi = useCallback((snap: JobSnapshot) => {
+    if (snap.status !== "needs_permission" || !snap.permission) {
       setCredentialModal(null);
       setSheetPermission(null);
       return;
     }
-    if (snap.status === "failed") {
-      setPhase("idle");
-      setError(snap.error || "Build failed");
-      return;
+    setPhase("permissions");
+    if (snap.permission.integration === "GMAIL" && snap.sheet?.id) {
+      setSheetPermission({
+        exportId: snap.sheet.id,
+        reconnectUrl: snap.permission.reconnectUrl,
+      });
+      setCredentialModal(null);
+    } else {
+      setCredentialModal(snap.permission.integration);
+      setSheetPermission(null);
     }
-    setPhase("building");
   }, []);
 
-  const continueJob = useCallback(
-    async (jobId: string) => {
-      const snap = await postJson<JobSnapshot>(`/api/v1/studio/jobs/${jobId}`);
-      handleJobSnapshot(snap);
+  /** Keep calling continue until ready, failed, or needs permission. */
+  const advanceUntilPaused = useCallback(
+    async (jobId: string, firstSnap?: JobSnapshot) => {
+      if (advancingRef.current) return;
+      advancingRef.current = true;
+      cancelledRef.current = false;
+
+      try {
+        let snap = firstSnap;
+        if (!snap) {
+          const payload = timerInstalledRef.current
+            ? { timerInstalled: true }
+            : undefined;
+          timerInstalledRef.current = false;
+          snap = await postJson<JobSnapshot>(
+            `/api/v1/studio/jobs/${jobId}`,
+            payload
+          );
+        }
+
+        while (!cancelledRef.current && snap.status === "running") {
+          setJob(snap);
+          setPhase("building");
+          // Brief pause so the running → done transition is visible
+          await sleep(420);
+          if (cancelledRef.current) break;
+          snap = await postJson<JobSnapshot>(`/api/v1/studio/jobs/${jobId}`);
+        }
+
+        if (cancelledRef.current) return;
+
+        setJob(snap);
+        jobIdRef.current = snap.id;
+
+        if (snap.status === "needs_permission") {
+          applyPermissionUi(snap);
+          return;
+        }
+        if (snap.status === "ready") {
+          setPhase("ready");
+          setCredentialModal(null);
+          setSheetPermission(null);
+          return;
+        }
+        if (snap.status === "failed") {
+          setPhase("idle");
+          setError(snap.error || "Build failed");
+          return;
+        }
+        setPhase("building");
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Something went wrong");
+        setPhase("idle");
+      } finally {
+        advancingRef.current = false;
+      }
     },
-    [handleJobSnapshot]
+    [applyPermissionUi]
   );
 
   const build = useCallback(async () => {
@@ -178,29 +229,62 @@ export function CreateStudio() {
     setJob(null);
     setSheetPermission(null);
     setCredentialModal(null);
+    jobIdRef.current = null;
+    cancelledRef.current = true;
+    // Allow previous loop to exit
+    await sleep(50);
+    cancelledRef.current = false;
 
     try {
       const snap = await postJson<JobSnapshot>("/api/v1/studio/jobs", {
         prompt: prompt.trim(),
         ...(asksForAutoUpdate ? { syncIntervalMinutes } : {}),
       });
-      handleJobSnapshot(snap);
+      jobIdRef.current = snap.id;
+      setJob(snap);
+
+      if (snap.status === "needs_permission") {
+        applyPermissionUi(snap);
+        return;
+      }
+      if (snap.status === "ready") {
+        setPhase("ready");
+        return;
+      }
+      if (snap.status === "failed") {
+        setPhase("idle");
+        setError(snap.error || "Build failed");
+        return;
+      }
+
+      await advanceUntilPaused(snap.id, snap);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Something went wrong");
       setPhase("idle");
     }
-  }, [prompt, syncIntervalMinutes, asksForAutoUpdate, handleJobSnapshot]);
+  }, [
+    prompt,
+    syncIntervalMinutes,
+    asksForAutoUpdate,
+    advanceUntilPaused,
+    applyPermissionUi,
+  ]);
 
-  const resumeAfterConnect = useCallback(async () => {
-    setCredentialModal(null);
-    await refreshIntegrations();
-    if (!job?.id) {
+  const resumeAfterPermission = useCallback(async () => {
+    const id = jobIdRef.current || job?.id;
+    if (!id) {
       await build();
       return;
     }
+    setSheetPermission(null);
+    setCredentialModal(null);
     setPhase("building");
-    await continueJob(job.id);
-  }, [build, continueJob, job?.id, refreshIntegrations]);
+    setError(null);
+    await refreshIntegrations();
+    // Short wait so Google token is readable after OAuth
+    await sleep(600);
+    await advanceUntilPaused(id);
+  }, [advanceUntilPaused, build, job?.id, refreshIntegrations]);
 
   async function runTest() {
     if (!job?.automation?.id) return;
@@ -322,7 +406,7 @@ export function CreateStudio() {
         <section className="space-y-3 rounded-2xl border border-border bg-background p-5">
           <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              AI task list
+              Live build
             </p>
             <h2 className="mt-1 text-lg font-semibold">{job.plan.name}</h2>
             <p className="mt-1 text-sm text-muted-foreground">
@@ -337,43 +421,17 @@ export function CreateStudio() {
               {job.plan.columnsFromUser ? "Your headings: " : "AI headings: "}
               {job.plan.columns.map((c) => c.label).join(", ")}
             </p>
+            {job.permission?.message && phase === "permissions" && (
+              <p className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-900 dark:text-amber-100">
+                {job.permission.message}
+              </p>
+            )}
           </div>
 
-          <ol className="space-y-2">
-            {job.tasks.map((t, i) => (
-              <li
-                key={t.id}
-                className={cn(
-                  "flex items-start gap-3 rounded-xl border px-3 py-2.5 text-sm",
-                  t.status === "done" && "border-emerald-500/40 bg-emerald-500/5",
-                  t.status === "running" && "border-blue-500/40 bg-blue-500/5",
-                  t.status === "blocked" && "border-amber-500/40 bg-amber-500/5",
-                  t.status === "failed" && "border-red-500/40 bg-red-500/5",
-                  t.status === "pending" && "border-border"
-                )}
-              >
-                <span className="mt-0.5 w-5 shrink-0 text-center font-mono text-xs text-muted-foreground">
-                  {t.status === "done"
-                    ? "✓"
-                    : t.status === "running"
-                      ? "…"
-                      : t.status === "blocked"
-                        ? "!"
-                        : t.status === "failed"
-                          ? "×"
-                          : i + 1}
-                </span>
-                <div className="min-w-0 flex-1">
-                  <p className="font-medium">{t.label}</p>
-                  {t.detail && (
-                    <p className="mt-0.5 text-xs text-muted-foreground break-all">
-                      {t.detail}
-                    </p>
-                  )}
-                </div>
-              </li>
-            ))}
-          </ol>
+          <StudioTaskProgress
+            tasks={job.tasks}
+            progressPercent={job.progress?.percent}
+          />
         </section>
       )}
 
@@ -475,7 +533,7 @@ export function CreateStudio() {
         }
         whatsappEncryptionReady={integrationStatus.whatsapp.encryptionReady}
         twilioEncryptionReady={integrationStatus.twilio.encryptionReady}
-        onConnected={() => void resumeAfterConnect()}
+        onConnected={() => void resumeAfterPermission()}
         onCancel={() => setCredentialModal(null)}
       />
 
@@ -483,9 +541,9 @@ export function CreateStudio() {
         <SheetPermissionModal
           exportId={sheetPermission.exportId}
           reconnectUrl={sheetPermission.reconnectUrl}
-          onDone={() => {
-            setSheetPermission(null);
-            if (job?.id) void continueJob(job.id);
+          onDone={(result) => {
+            timerInstalledRef.current = result.installed;
+            void resumeAfterPermission();
           }}
           onCancel={() => setSheetPermission(null)}
         />
