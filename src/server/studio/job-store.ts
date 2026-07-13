@@ -1,7 +1,7 @@
-import { promises as fs } from "fs";
-import path from "path";
+import type { Prisma } from "@prisma/client";
 import type { StudioProductPlan, StudioTaskId } from "@/server/studio/plan-product";
 import type { WorkflowGraph } from "@/types/automation";
+import { prisma } from "@/server/db";
 
 export type StudioJobTaskStatus =
   | "pending"
@@ -65,36 +65,28 @@ function memoryStore(): Map<string, StudioJob> {
   return g.__inboxflowStudioJobs;
 }
 
-function jobsDir(): string {
-  return path.join(process.cwd(), ".data", "studio-jobs");
-}
-
-async function ensureJobsDir() {
-  await fs.mkdir(jobsDir(), { recursive: true });
-}
-
 async function persistJob(job: StudioJob) {
   memoryStore().set(job.id, job);
-  try {
-    await ensureJobsDir();
-    await fs.writeFile(
-      path.join(jobsDir(), `${job.id}.json`),
-      JSON.stringify(job),
-      "utf8"
-    );
-  } catch (err) {
-    console.warn("[studio-job] persist failed:", err);
-  }
+  const payload = job as unknown as Prisma.InputJsonValue;
+  await prisma.studioJob.upsert({
+    where: { id: job.id },
+    create: {
+      id: job.id,
+      organizationId: job.organizationId,
+      userId: job.userId,
+      payload,
+    },
+    update: { payload },
+  });
 }
 
-async function loadJobFromDisk(id: string): Promise<StudioJob | null> {
+async function loadJobFromDb(id: string): Promise<StudioJob | null> {
   try {
-    const raw = await fs.readFile(
-      path.join(jobsDir(), `${id}.json`),
-      "utf8"
-    );
-    return JSON.parse(raw) as StudioJob;
-  } catch {
+    const row = await prisma.studioJob.findUnique({ where: { id } });
+    if (!row?.payload || typeof row.payload !== "object") return null;
+    return row.payload as unknown as StudioJob;
+  } catch (err) {
+    console.error("[studio-job] load failed:", err);
     return null;
   }
 }
@@ -136,14 +128,13 @@ export async function createStudioJob(params: {
 }
 
 export async function getStudioJob(id: string): Promise<StudioJob | null> {
-  const mem = memoryStore().get(id);
-  if (mem) return mem;
-  const disk = await loadJobFromDisk(id);
-  if (disk) {
-    memoryStore().set(id, disk);
-    return disk;
+  // Prefer DB so Next.js hot-reloads / multi-worker don't drop mid-build jobs.
+  const fromDb = await loadJobFromDb(id);
+  if (fromDb) {
+    memoryStore().set(id, fromDb);
+    return fromDb;
   }
-  return null;
+  return memoryStore().get(id) ?? null;
 }
 
 export async function saveStudioJob(job: StudioJob): Promise<StudioJob> {

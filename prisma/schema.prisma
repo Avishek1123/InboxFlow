@@ -255,6 +255,7 @@ model Organization {
   extractionTables      ExtractionTable[]
   extractionTableRows   ExtractionTableRow[]
   sheetExports            SheetExport[]
+  studioJobs              StudioJob[]
   agentRuns               AgentRun[]
   approvalRequests        ApprovalRequest[]
   conversationMemories    ConversationMemory[]
@@ -787,6 +788,22 @@ model SheetExport {
   @@unique([organizationId, extractionTableId])
   @@index([apiKeyHash])
   @@map("sheet_exports")
+}
+
+/// Ephemeral studio build jobs (prompt → tasks → sheet). Survives server reloads.
+model StudioJob {
+  id             String   @id
+  organizationId String
+  userId         String
+  /// Full StudioJob payload (tasks, plan, sheet ids, etc.)
+  payload        Json
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("studio_jobs")
 }
 
 model ExtractionTableRow {

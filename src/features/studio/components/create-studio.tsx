@@ -211,6 +211,7 @@ export function CreateStudio() {
         }
         setPhase("building");
       } catch (e) {
+        cancelledRef.current = true;
         setError(e instanceof Error ? e.message : "Something went wrong");
         setPhase("idle");
       } finally {
