@@ -76,7 +76,10 @@ export const sheetExportClient = {
     });
   },
 
-  installTrigger(id: string, options?: { repairOnly?: boolean }) {
+  installTrigger(
+    id: string,
+    options?: { repairOnly?: boolean; triggerMinutes?: number }
+  ) {
     return request<{
       triggerInstalled: boolean;
       triggerCount: number;
@@ -86,10 +89,12 @@ export const sheetExportClient = {
       message: string;
       reason?: string;
       errorMessage?: string;
+      webAppUrl?: string | null;
     }>(`/api/v1/sheet-exports/${id}/install-trigger`, {
       method: "POST",
       body: JSON.stringify({
         repairOnly: options?.repairOnly ?? true,
+        triggerMinutes: options?.triggerMinutes,
       }),
     });
   },

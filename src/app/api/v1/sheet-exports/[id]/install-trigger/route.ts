@@ -16,9 +16,19 @@ export async function POST(request: Request, { params }: Params) {
     const { organization } = await requireOrganization();
     const { id } = await params;
     let repairOnly = true;
+    let triggerMinutes: number | undefined;
     try {
-      const body = (await request.json()) as { repairOnly?: boolean };
+      const body = (await request.json()) as {
+        repairOnly?: boolean;
+        triggerMinutes?: number;
+      };
       if (body.repairOnly === false) repairOnly = false;
+      if (
+        typeof body.triggerMinutes === "number" &&
+        Number.isFinite(body.triggerMinutes)
+      ) {
+        triggerMinutes = Math.max(1, Math.min(60, body.triggerMinutes));
+      }
     } catch {
       /* empty body → repair-only poll */
     }
@@ -32,6 +42,7 @@ export async function POST(request: Request, { params }: Params) {
       exportId: id,
       requestOrigin: new URL(request.url).origin,
       repairOnly,
+      triggerMinutes,
     });
 
     return apiSuccess(result);

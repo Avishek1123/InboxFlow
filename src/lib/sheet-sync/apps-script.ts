@@ -47,6 +47,10 @@ export function buildAppsScriptManifest(timeZone = "Etc/UTC"): string {
     executionApi: {
       access: "MYSELF",
     },
+    webapp: {
+      access: "MYSELF",
+      executeAs: "USER_ACCESSING",
+    },
     oauthScopes: [
       "https://www.googleapis.com/auth/spreadsheets.currentonly",
       "https://www.googleapis.com/auth/script.external_request",
@@ -369,6 +373,22 @@ function runStandaloneSync_() {
   return { written: written, updated: updated, scanned: messages.length };
 }
 
+function markTriggerMeta_(count) {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) return;
+    var sh = ss.getSheetByName('_InboxFlow');
+    if (!sh) sh = ss.insertSheet('_InboxFlow');
+    sh.getRange(1, 1, 2, 2).setValues([
+      ['triggerCount', String(count)],
+      ['updatedAt', new Date().toISOString()],
+    ]);
+    try {
+      sh.hideSheet();
+    } catch (hideErr) {}
+  } catch (metaErr) {}
+}
+
 function installInboxFlowTimeTrigger_() {
   var triggers = ScriptApp.getProjectTriggers();
   for (var i = 0; i < triggers.length; i++) {
@@ -380,6 +400,7 @@ function installInboxFlowTimeTrigger_() {
     .timeBased()
     .everyMinutes(${triggerMinutes})
     .create();
+  markTriggerMeta_(inboxFlowTriggerCount_());
 }
 
 function primeInboxFlowAuthorization() {
@@ -403,6 +424,50 @@ function recordSyncSuccess_(stats) {
 function setupInboxFlowAutomationFromApi() {
   installInboxFlowTimeTrigger_();
   return inboxFlowTriggerCount_();
+}
+
+/**
+ * Web app entry — opened from InboxFlow website popup.
+ * User authorizes once in Google; timer is installed in their account (no sheet menu).
+ */
+function doGet(e) {
+  try {
+    installInboxFlowTimeTrigger_();
+    var count = inboxFlowTriggerCount_();
+    try {
+      runStandaloneSync_();
+    } catch (syncErr) {
+      /* first sync may need Gmail auth; timer is still on */
+      PropertiesService.getDocumentProperties().setProperty(
+        'INBOXFLOW_LAST_ERROR',
+        String(syncErr && syncErr.message ? syncErr.message : syncErr)
+      );
+    }
+    var html =
+      '<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;padding:24px;">' +
+      '<h2>InboxFlow auto-sync is on</h2>' +
+      '<p>Timer: every ${triggerMinutes} min · ' +
+      count +
+      ' trigger(s).</p>' +
+      '<p>You can close this window and return to InboxFlow.</p>' +
+      '<script>try{if(window.opener){window.opener.postMessage({type:"inboxflow-apps-script-auth",ok:true,triggerCount:' +
+      count +
+      '},"*");}}catch(e){}</script>' +
+      '</body></html>';
+    return HtmlService.createHtmlOutput(html).setTitle('InboxFlow Auto-sync');
+  } catch (err) {
+    var msg = err && err.message ? err.message : String(err);
+    var fail =
+      '<!DOCTYPE html><html><body style="font-family:system-ui,sans-serif;padding:24px;">' +
+      '<h2>Could not enable auto-sync</h2><p>' +
+      msg.replace(/</g, '&lt;') +
+      '</p><p>Close this window and try again from InboxFlow.</p>' +
+      '<script>try{if(window.opener){window.opener.postMessage({type:"inboxflow-apps-script-auth",ok:false,message:' +
+      JSON.stringify(msg) +
+      '},"*");}}catch(e){}</script>' +
+      '</body></html>';
+    return HtmlService.createHtmlOutput(fail).setTitle('InboxFlow Auto-sync');
+  }
 }
 
 function inboxFlowTriggerCount() {
@@ -470,36 +535,12 @@ function showInboxFlowStatus() {
   }
 }
 
-function onOpen() {
-  try {
-    SpreadsheetApp.getUi()
-      .createMenu('InboxFlow')
-      .addItem('Enable auto-sync', 'setupInboxFlowAutomation')
-      .addItem('Sync now', 'syncInboxFlowData')
-      .addItem('Sync status', 'showInboxFlowStatus')
-      .addToUi();
-  } catch (e) {
-    Logger.log('InboxFlow menu: ' + e);
-  }
-}
-
 function syncInboxFlowData() {
   try {
     var stats = runStandaloneSync_();
     recordSyncSuccess_(stats);
     Logger.log('Standalone sync: ' + JSON.stringify(stats));
-    try {
-      SpreadsheetApp.getUi().alert(
-        'Synced starred mail → sheet.\\nNew: ' +
-          stats.written +
-          ' · Updated: ' +
-          stats.updated +
-          ' · Scanned: ' +
-          stats.scanned
-      );
-    } catch (uiErr) {
-      /* time trigger has no UI */
-    }
+    // Silent — timer + website Sync now. No sheet dialogs.
   } catch (e) {
     PropertiesService.getDocumentProperties().setProperty(
       'INBOXFLOW_LAST_ERROR',
@@ -507,6 +548,11 @@ function syncInboxFlowData() {
     );
     throw e;
   }
+}
+
+/** Menu disabled — enable + sync only from the InboxFlow website. */
+function onOpen() {
+  /* intentionally empty */
 }
 `;
 }

@@ -6,6 +6,8 @@ import { sheetExportClient } from "@/services/sheet-export-client";
 type Props = {
   exportId: string;
   reconnectUrl: string;
+  /** Apps Script web app that installs the time trigger after user authorizes. */
+  webAppUrl?: string | null;
   /** Auto-start Google OAuth + install (end-to-end, no sheet menu). */
   autoStart?: boolean;
   onDone: (result: { installed: boolean; message: string }) => void;
@@ -14,28 +16,71 @@ type Props = {
 
 /**
  * Finishes product auto-sync inside InboxFlow.
- * OAuth can fix "authorization" errors. GCP project link cannot be done via API —
- * in that case we finish and let the studio job fall back to server sync.
+ * 1) Google OAuth (scopes)
+ * 2) Push Apps Script + try scripts.run
+ * 3) If needed, open web app URL once so the user authorizes ScriptApp timers
  */
 export function SheetPermissionModal({
   exportId,
   reconnectUrl,
+  webAppUrl: initialWebAppUrl,
   autoStart = true,
   onDone,
   onCancel,
 }: Props) {
   const [busy, setBusy] = useState(false);
+  const [webAppUrl, setWebAppUrl] = useState<string | null>(
+    initialWebAppUrl ?? null
+  );
   const [status, setStatus] = useState<string | null>(
     "Finishing your product — connecting Google…"
   );
 
+  const openWebAppAuth = useCallback((url: string) => {
+    const w = 560;
+    const h = 720;
+    const left = window.screenX + (window.outerWidth - w) / 2;
+    const top = window.screenY + (window.outerHeight - h) / 2;
+    window.open(
+      url,
+      "inboxflow-apps-script-auth",
+      `width=${w},height=${h},left=${left},top=${top}`
+    );
+    setStatus(
+      "In the Google window: click Allow / Review permissions. That turns on the 1‑minute sheet sync timer."
+    );
+  }, []);
+
+  const pollUntilInstalled = useCallback(async () => {
+    for (let i = 0; i < 8; i++) {
+      setStatus(`Checking Apps Script timer (${i + 1}/8)…`);
+      const res = await sheetExportClient.installTrigger(exportId, {
+        repairOnly: true,
+      });
+      if (res.webAppUrl) setWebAppUrl(res.webAppUrl);
+      if (res.triggerInstalled) {
+        onDone({
+          installed: true,
+          message:
+            res.message ||
+            "Auto-sync enabled. Your sheet updates every minute via Apps Script.",
+        });
+        return true;
+      }
+      await new Promise((r) => setTimeout(r, 2500));
+    }
+    return false;
+  }, [exportId, onDone]);
+
   const finishTrigger = useCallback(async () => {
     setBusy(true);
-    setStatus("Installing auto-sync on your sheet…");
+    setStatus("Installing Apps Script auto-sync on your sheet…");
     try {
       const first = await sheetExportClient.installTrigger(exportId, {
         repairOnly: false,
       });
+      if (first.webAppUrl) setWebAppUrl(first.webAppUrl);
+
       if (first.triggerInstalled) {
         onDone({
           installed: true,
@@ -46,14 +91,24 @@ export function SheetPermissionModal({
         return;
       }
 
-      let reason = first.reason ?? null;
+      const url = first.webAppUrl || webAppUrl || initialWebAppUrl;
+      if (url) {
+        openWebAppAuth(url);
+        const ok = await pollUntilInstalled();
+        if (ok) return;
+        setStatus(
+          "Timer not confirmed yet. Click “Open Apps Script approval” again, allow all permissions, then Retry."
+        );
+        return;
+      }
 
-      await new Promise((r) => setTimeout(r, 2000));
+      let reason = first.reason ?? null;
       for (let i = 0; i < 3; i++) {
         setStatus(`Retrying auto-sync install (${i + 1}/3)…`);
         const res = await sheetExportClient.installTrigger(exportId, {
           repairOnly: true,
         });
+        if (res.webAppUrl) setWebAppUrl(res.webAppUrl);
         if (res.triggerInstalled) {
           onDone({
             installed: true,
@@ -64,18 +119,12 @@ export function SheetPermissionModal({
           return;
         }
         if (res.reason) reason = res.reason;
+        if (res.webAppUrl) {
+          openWebAppAuth(res.webAppUrl);
+          const ok = await pollUntilInstalled();
+          if (ok) return;
+        }
         await new Promise((r) => setTimeout(r, 2500));
-      }
-
-      // gcp_project cannot be fixed by another OAuth popup — continue so
-      // the studio job can enable InboxFlow server auto-fetch instead.
-      if (reason === "gcp_project") {
-        onDone({
-          installed: false,
-          message:
-            "Apps Script timer needs a GCP link Google doesn’t allow via API. Continuing with InboxFlow auto-fetch.",
-        });
-        return;
       }
 
       if (reason === "authorization") {
@@ -89,14 +138,21 @@ export function SheetPermissionModal({
         installed: false,
         message:
           first.message ||
-          "Continuing with InboxFlow auto-fetch so your product can go live.",
+          "Could not install the Apps Script timer. Try again.",
       });
     } catch (e) {
       setStatus(e instanceof Error ? e.message : "Setup failed");
     } finally {
       setBusy(false);
     }
-  }, [exportId, onDone]);
+  }, [
+    exportId,
+    initialWebAppUrl,
+    onDone,
+    openWebAppAuth,
+    pollUntilInstalled,
+    webAppUrl,
+  ]);
 
   function openGooglePermissions() {
     setStatus(null);
@@ -119,6 +175,26 @@ export function SheetPermissionModal({
 
   useEffect(() => {
     if (!autoStart) return;
+    // If we already have a web app URL, prefer that path immediately.
+    if (initialWebAppUrl) {
+      const t = window.setTimeout(() => {
+        openWebAppAuth(initialWebAppUrl);
+        void (async () => {
+          setBusy(true);
+          try {
+            const ok = await pollUntilInstalled();
+            if (!ok) {
+              setStatus(
+                "Approve the Google window, then click Retry install."
+              );
+            }
+          } finally {
+            setBusy(false);
+          }
+        })();
+      }, 400);
+      return () => window.clearTimeout(t);
+    }
     const t = window.setTimeout(() => openGooglePermissions(), 350);
     return () => window.clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps -- open once on mount
@@ -126,7 +202,34 @@ export function SheetPermissionModal({
 
   useEffect(() => {
     function onMessage(event: MessageEvent) {
-      const data = event.data as { type?: string; ok?: boolean; message?: string };
+      const data = event.data as {
+        type?: string;
+        ok?: boolean;
+        message?: string;
+        triggerCount?: number;
+      };
+      if (data?.type === "inboxflow-apps-script-auth") {
+        if (data.ok) {
+          void (async () => {
+            setBusy(true);
+            try {
+              const ok = await pollUntilInstalled();
+              if (!ok) {
+                onDone({
+                  installed: true,
+                  message:
+                    "Apps Script authorization finished. Auto-sync timer should be on.",
+                });
+              }
+            } finally {
+              setBusy(false);
+            }
+          })();
+        } else {
+          setStatus(data.message ?? "Apps Script approval failed.");
+        }
+        return;
+      }
       if (data?.type !== "inboxflow-gmail-oauth") return;
       if (data.ok) {
         void finishTrigger();
@@ -136,26 +239,41 @@ export function SheetPermissionModal({
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [finishTrigger]);
+  }, [finishTrigger, onDone, pollUntilInstalled]);
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm"
       role="dialog"
       aria-labelledby="sheet-permission-title"
     >
-      <div className="w-full max-w-md rounded-2xl border border-border bg-background p-6 shadow-xl">
-        <h2 id="sheet-permission-title" className="text-lg font-semibold">
-          Finishing your product
+      <div className="w-full max-w-md rounded-3xl border border-border bg-background p-6 shadow-2xl">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.28em] text-muted-foreground">
+          Final step · Website only
+        </p>
+        <h2 id="sheet-permission-title" className="mt-2 text-xl font-semibold tracking-tight">
+          Activate 1‑minute sheet sync
         </h2>
         <p className="mt-2 text-sm text-muted-foreground">
-          Google approval turns on auto-fetch (starred Gmail → AI → your sheet).
-          If the Apps Script timer cannot be linked, InboxFlow will sync for you.
+          Approve Google here. We install Apps Script on your sheet so starred
+          Gmail → AI → sheet every minute. You never open a sheet menu.
         </p>
         {status && (
           <p className="mt-3 rounded-lg bg-muted/60 px-3 py-2 text-sm">{status}</p>
         )}
         <div className="mt-6 flex flex-wrap gap-2">
+          {(webAppUrl || initialWebAppUrl) && (
+            <button
+              type="button"
+              onClick={() =>
+                openWebAppAuth((webAppUrl || initialWebAppUrl) as string)
+              }
+              disabled={busy}
+              className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+            >
+              Open Apps Script approval
+            </button>
+          )}
           <button
             type="button"
             onClick={openGooglePermissions}
@@ -171,19 +289,6 @@ export function SheetPermissionModal({
             className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
           >
             {busy ? "Installing…" : "Retry install"}
-          </button>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() =>
-              onDone({
-                installed: false,
-                message: "Continuing with InboxFlow auto-fetch.",
-              })
-            }
-            className="rounded-lg border border-border px-4 py-2.5 text-sm font-medium hover:bg-muted disabled:opacity-50"
-          >
-            Continue anyway
           </button>
           <button
             type="button"

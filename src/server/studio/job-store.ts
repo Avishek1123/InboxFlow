@@ -35,6 +35,10 @@ export type StudioJob = {
     integration: "GMAIL" | "WHATSAPP" | "TWILIO";
     reconnectUrl: string;
     message: string;
+    /** Open once to install Apps Script time trigger. */
+    webAppUrl?: string | null;
+    sheetExportId?: string;
+    reason?: string;
   };
   /** User clicked "Enable auto-sync" in the studio UI. */
   autosyncConfirmed?: boolean;
@@ -59,7 +63,7 @@ const TASK_LABELS: Record<StudioTaskId, string> = {
   create_table: "Create data table with headings",
   collect_data: "Collect starred emails & extract data",
   create_sheet: "Create Google Sheet with your data",
-  enable_autosync: "Enable auto-sync (your click)",
+  enable_autosync: "Arm 1‑minute Apps Script sync",
   activate: "Activate product",
 };
 

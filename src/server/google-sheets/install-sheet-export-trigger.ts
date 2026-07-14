@@ -9,8 +9,10 @@ import {
   isAppsScriptUserSettingsError,
 } from "@/lib/gmail/google-api-errors";
 import { getSyncPipelineConfig } from "@/lib/gmail/sync-pipeline-config";
+import { ensureWebAppDeployment } from "@/server/google-sheets/ensure-script-deployment";
 import { pushBoundScriptContent } from "@/server/google-sheets/finalize-bound-script";
 import { installAppsScriptTimeTrigger } from "@/server/google-sheets/install-apps-script-trigger";
+import { readInboxFlowTriggerMeta } from "@/server/google-sheets/read-inboxflow-trigger-meta";
 import { boundScriptHasInboxFlowCode } from "@/server/google-sheets/verify-bound-script";
 import { buildStandaloneAppsScriptConfig } from "@/server/sheet-sync/standalone-script-config";
 import { prisma } from "@/server/db";
@@ -27,6 +29,11 @@ export type InstallSheetTriggerResult = {
   reason?: string;
   /** Raw Apps Script API error (for debugging). */
   errorMessage?: string;
+  /**
+   * Open in a popup from InboxFlow — user authorizes once; installs the
+   * 1-min Apps Script timer (works when scripts.run / GCP link fails).
+   */
+  webAppUrl?: string | null;
 };
 
 /** Resolve container-bound script id (stored, or create if the sheet has no project yet). */
@@ -145,10 +152,44 @@ export async function installSheetExportTrigger(params: {
       reason: "ok",
       message:
         `Auto-sync is on (${setup.triggerCount} timer, every ${sheetTriggerMinutes} min). ` +
-        `Starred Gmail → Gemini AI → this sheet (runs in Google — InboxFlow server not required). ` +
-        `Open the sheet → InboxFlow → Sync now if empty.`,
+        `Starred Gmail → Groq AI → this sheet (runs in Google Apps Script).`,
     };
   }
+
+  // User may have installed the timer via the web-app popup; meta tab confirms it.
+  const meta = await readInboxFlowTriggerMeta(params.auth, row.spreadsheetId);
+  if (meta.triggerCount > 0) {
+    return {
+      triggerInstalled: true,
+      triggerCount: meta.triggerCount,
+      appsScriptId: scriptId,
+      spreadsheetUrl,
+      scriptEditorUrl,
+      reason: "ok",
+      message:
+        `Auto-sync is on (${meta.triggerCount} timer, every ${sheetTriggerMinutes} min). ` +
+        `Starred Gmail → Groq AI → this sheet (runs in Google Apps Script).`,
+    };
+  }
+
+  // When scripts.run cannot create the timer, deploy a web app the user
+  // opens once from InboxFlow (authorizes + installs the time trigger).
+  let webAppUrl: string | null = null;
+  try {
+    const web = await ensureWebAppDeployment(params.auth, scriptId, {
+      forceNewVersion: mustPushScript,
+    });
+    webAppUrl = web.url;
+  } catch (err) {
+    console.warn(
+      "[installSheetExportTrigger] web app:",
+      err instanceof Error ? err.message : err
+    );
+  }
+
+  const webHint = webAppUrl
+    ? " Finish Google approval in the InboxFlow popup — that turns on the Apps Script 1‑minute timer."
+    : "";
 
   if (setup.reason === "gcp_project") {
     return {
@@ -159,7 +200,10 @@ export async function installSheetExportTrigger(params: {
       scriptEditorUrl,
       reason: "gcp_project",
       errorMessage: setup.errorMessage,
-      message: inboxflowGcpLinkStepsMessage(scriptId),
+      webAppUrl,
+      message: webAppUrl
+        ? `Apps Script is ready.${webHint}`
+        : inboxflowGcpLinkStepsMessage(scriptId),
     };
   }
 
@@ -172,9 +216,8 @@ export async function installSheetExportTrigger(params: {
       scriptEditorUrl,
       reason: "authorization",
       errorMessage: setup.errorMessage,
-      message:
-        `Open InboxFlow → Finish Google approval (one popup). No sheet menu needed.` +
-        (setup.errorMessage ? ` (${setup.errorMessage})` : ""),
+      webAppUrl,
+      message: `Google needs one more approval to start the sheet timer.${webHint}`,
     };
   }
 
@@ -185,8 +228,11 @@ export async function installSheetExportTrigger(params: {
       appsScriptId: scriptId,
       spreadsheetUrl,
       scriptEditorUrl,
-      reason: "sheet_menu",
-      message: inboxflowSheetTriggerFallbackMessage(scriptId),
+      reason: webAppUrl ? "web_app_auth" : "sheet_menu",
+      webAppUrl,
+      message: webAppUrl
+        ? `Apps Script project created.${webHint}`
+        : inboxflowSheetTriggerFallbackMessage(scriptId),
     };
   }
 
@@ -196,9 +242,10 @@ export async function installSheetExportTrigger(params: {
     appsScriptId: scriptId,
     spreadsheetUrl,
     scriptEditorUrl,
-    reason: setup.reason,
+    reason: webAppUrl ? "web_app_auth" : setup.reason,
+    webAppUrl,
     message:
-      setup.errorMessage ??
-      "Could not install the timer. Use Grant Google permissions on this page.",
+      (setup.errorMessage ??
+        "Could not install the timer from the API.") + webHint,
   };
 }

@@ -4,9 +4,12 @@ import { hasGoogleSheetsScopes } from "@/lib/gmail/scopes";
 import { generateWorkflowFromPrompt } from "@/server/agent";
 import { getGmailTokenHealth } from "@/server/google/gmail-token-health";
 import { collectStarredMailToTable } from "@/server/google-sheets/collect-starred-mail-to-table";
+import { installSheetExportTrigger } from "@/server/google-sheets/install-sheet-export-trigger";
 import { provisionGoogleSheetExport } from "@/server/google-sheets/provision-sheet";
 import { pushSheetExportDataFromServer } from "@/server/google-sheets/push-sheet-export-data";
 import { syncStarredMailToSheet } from "@/server/google-sheets/sync-starred-mail-to-sheet";
+import { getGoogleAuthClientForOrganization } from "@/server/google/auth-client";
+import { ensureSheetsOAuthClient } from "@/server/google/ensure-sheets-auth";
 import { automationRepository } from "@/server/repositories/automation.repository";
 import { extractionTableRepository } from "@/server/repositories/extraction-table.repository";
 import { gmailRepository } from "@/server/repositories/gmail.repository";
@@ -228,8 +231,9 @@ export async function continueStudioJob(params: {
         sheetTitle: job.plan.sheetTitle,
         apiKey: key,
         apiBaseUrl: params.requestOrigin,
-        triggerMinutes: job.plan.syncMinutes,
-        websiteAutosyncOnly: true,
+        triggerMinutes: 1,
+        // Bound Apps Script now; 1‑min timer arms on website Enable auto-sync.
+        websiteAutosyncOnly: false,
       });
       const created = await sheetExportRepository.create({
         organizationId: job.organizationId,
@@ -239,7 +243,7 @@ export async function continueStudioJob(params: {
         spreadsheetId: provisioned.spreadsheetId,
         spreadsheetUrl: provisioned.spreadsheetUrl,
         appsScriptId: provisioned.appsScriptId || undefined,
-        syncIntervalMinutes: job.plan.syncMinutes,
+        syncIntervalMinutes: 1,
         apiKeyHash: hash,
         apiKeyPrefix: prefix,
       });
@@ -280,7 +284,7 @@ export async function continueStudioJob(params: {
           job,
           task.id,
           "blocked",
-          "Click Enable auto-sync — Google permissions open in this app"
+          "Activate live sync on this website — Google approval only"
         );
         job.status = "awaiting_autosync";
         await saveStudioJob(job);
@@ -319,34 +323,44 @@ export async function continueStudioJob(params: {
         return publicStudioJob(job);
       }
 
-      // Website keep-alive path only — Sheets API write, Groq AI extract.
-      // No Apps Script authorization / sheet menu.
-      try {
-        const { ensureSheetKeepAliveWorker } = await import(
-          "@/server/google-sheets/sheet-keepalive"
-        );
-        ensureSheetKeepAliveWorker();
-      } catch {
-        /* ignore */
-      }
+      // Install container-bound Apps Script + 1‑min time trigger (Google cloud).
+      const { account } = await getGoogleAuthClientForOrganization(
+        job.organizationId
+      );
+      const auth = await ensureSheetsOAuthClient(account);
+      const installed = await installSheetExportTrigger({
+        auth,
+        organizationId: job.organizationId,
+        exportId: job.exportId,
+        requestOrigin: params.requestOrigin,
+        repairOnly: false,
+        triggerMinutes: 1,
+      });
+      job.appsScriptId = installed.appsScriptId;
+      job.plan.syncMinutes = 1;
 
-      let rowCount = 0;
-      let messagesFetched = 0;
-      let extracted = 0;
-      try {
-        const synced = await syncStarredMailToSheet({
-          organizationId: job.organizationId,
-          exportId: job.exportId,
-          starredOnly: job.plan.starredOnly,
-        });
-        rowCount = synced.rowCount;
-        messagesFetched = synced.messagesFetched;
-        extracted = synced.extracted;
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : "sync failed";
-        markTask(job, task.id, "failed", msg);
-        job.status = "failed";
-        job.error = msg;
+      if (!installed.triggerInstalled) {
+        markTask(
+          job,
+          task.id,
+          "blocked",
+          "Finish Google approval on this website to arm the 1‑minute Apps Script timer"
+        );
+        job.status = "needs_permission";
+        job.autosyncConfirmed = false;
+        job.permission = {
+          integration: "GMAIL",
+          reconnectUrl: buildGmailReconnectUrl(params.requestOrigin, {
+            popup: true,
+            sheetExportId: job.exportId,
+          }),
+          message:
+            installed.message ||
+            "Approve Google once here — Apps Script will sync your sheet every minute. Nothing to click in the sheet.",
+          webAppUrl: installed.webAppUrl ?? null,
+          sheetExportId: job.exportId,
+          reason: installed.reason,
+        };
         await saveStudioJob(job);
         return publicStudioJob(job);
       }
@@ -354,19 +368,43 @@ export async function continueStudioJob(params: {
       await sheetExportRepository.updateSyncInterval(
         job.exportId,
         job.organizationId,
-        job.plan.syncMinutes
+        1
       );
 
+      // Seed sheet immediately; timer keeps it fresh in Google.
+      let rowCount = 0;
+      try {
+        const synced = await syncStarredMailToSheet({
+          organizationId: job.organizationId,
+          exportId: job.exportId,
+          starredOnly: job.plan.starredOnly,
+        });
+        rowCount = synced.rowCount;
+      } catch (err) {
+        console.warn(
+          "[studio] seed sync after Apps Script:",
+          err instanceof Error ? err.message : err
+        );
+      }
+
+      try {
+        const { ensureSheetKeepAliveWorker } = await import(
+          "@/server/google-sheets/sheet-keepalive"
+        );
+        ensureSheetKeepAliveWorker();
+      } catch {
+        /* optional backup */
+      }
+
       job.autoSyncOn = true;
+      job.permission = undefined;
       markTask(
         job,
         task.id,
         "done",
         rowCount > 0
-          ? `Auto-sync on — every ${job.plan.syncMinutes} min · ${rowCount} rows in sheet`
-          : messagesFetched > 0
-            ? `Auto-sync on — fetched ${messagesFetched} mails but extracted ${extracted} rows (check Groq limits). Use Sync now.`
-            : `Auto-sync on — every ${job.plan.syncMinutes} min. No starred mail yet — star an email then Sync now.`
+          ? `Apps Script live — every 1 min · ${rowCount} rows`
+          : "Apps Script live — every 1 min (runs in Google, no sheet menu)"
       );
     } else if (task.id === "activate") {
       const graph = await ensureWorkflowGraph(job);

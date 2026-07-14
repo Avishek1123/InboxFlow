@@ -1,7 +1,6 @@
 import { completeWithFallback } from "@/server/ai/router";
 import { extractJsonFromResponse } from "@/server/ai/utils";
 import { normalizeColumns } from "@/server/ai/custom-table-extract";
-import { parseSheetSyncMinutesFromPrompt } from "@/lib/studio/parse-sheet-sync-minutes";
 import {
   parseSheetTitleFromPrompt,
   sanitizeSheetTitle,
@@ -111,10 +110,6 @@ export async function planStudioProduct(params: {
   const prompt = params.prompt.trim();
   const userColumns = parseColumnsFromPrompt(prompt);
   const starredOnly = promptRequestsStarredOnly(prompt);
-  const parsedSync =
-    params.syncIntervalMinutes ??
-    parseSheetSyncMinutesFromPrompt(prompt) ??
-    1;
   const parsedTitle = parseSheetTitleFromPrompt(prompt);
 
   const completion = await completeWithFallback({
@@ -197,15 +192,8 @@ Rules:
     columnsFromUser = false;
   }
 
-  const syncMinutes = Math.max(
-    1,
-    Math.min(
-      60,
-      typeof parsed.sheetSyncMinutes === "number"
-        ? Math.round(parsed.sheetSyncMinutes)
-        : parsedSync
-    )
-  );
+  // Studio products always arm a 1‑minute Apps Script timer (website permissions).
+  const syncMinutes = 1;
 
   const sheetTitle =
     sanitizeSheetTitle(parsed.sheetTitle || "") ||
@@ -225,7 +213,7 @@ Rules:
     name: (parsed.name || sheetTitle || "InboxFlow product").slice(0, 120),
     description:
       parsed.description ||
-      `Collect data into Google Sheet "${sheetTitle}" every ${syncMinutes} min.`,
+      `Collect starred Gmail into Google Sheet "${sheetTitle}" — Apps Script sync every 1 min.`,
     sheetTitle,
     syncMinutes,
     starredOnly: Boolean(parsed.starredOnly) || starredOnly,
