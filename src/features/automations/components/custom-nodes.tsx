@@ -16,7 +16,7 @@ function NodeAppIcon({ app, size }: { app: NodeAppId; size: number }) {
   if (app === "messages") return <WhatsAppIcon size={size} />;
   return (
     <span
-      className="flex items-center justify-center rounded bg-muted text-[10px] font-bold"
+      className="flex items-center justify-center rounded-md bg-muted text-[10px] font-bold"
       style={{ width: size, height: size }}
     >
       {app[0]?.toUpperCase()}
@@ -30,7 +30,23 @@ function nodeSubtitle(d: WorkflowNodeData): string | null {
     return MESSAGING_OPTIONS.find((o) => o.id === id)?.label ?? null;
   }
   const def = getDefinition(d.kind);
-  return def?.description?.slice(0, 48) ?? null;
+  return def?.description?.slice(0, 56) ?? null;
+}
+
+/** Key config values worth surfacing on the card. */
+function nodeConfigChips(d: WorkflowNodeData): string[] {
+  const chips: string[] = [];
+  const cfg = d.config as Record<string, unknown>;
+  if (typeof cfg.tableName === "string" && cfg.tableName) {
+    chips.push(String(cfg.tableName));
+  }
+  if (typeof cfg.sheetTitle === "string" && cfg.sheetTitle) {
+    chips.push(String(cfg.sheetTitle));
+  }
+  if (typeof cfg.cronExpression === "string" && cfg.cronExpression) {
+    chips.push(String(cfg.cronExpression));
+  }
+  return chips.slice(0, 2);
 }
 
 function CanvasNode({
@@ -41,37 +57,78 @@ function CanvasNode({
   const d = data as WorkflowNodeData;
   const def = getDefinition(d.kind);
   const app = def?.app ?? getAppForKind(d.kind);
+  const accent = def?.color ?? (nodeType === "trigger" ? "#f59e0b" : "#10b981");
+  const subtitle = nodeSubtitle(d);
+  const chips = nodeConfigChips(d);
 
   return (
     <div
-      className={`min-w-[200px] max-w-[240px] rounded-xl border-2 bg-background shadow-md transition-shadow ${
-        selected ? "border-primary ring-2 ring-primary/20" : "border-border"
+      className={`group relative min-w-[210px] max-w-[250px] rounded-2xl border bg-background shadow-[0_4px_16px_rgba(0,0,0,0.08)] transition-all duration-200 ${
+        selected
+          ? "border-primary shadow-[0_8px_28px_rgba(0,0,0,0.14)] ring-2 ring-primary/25"
+          : "border-border hover:-translate-y-0.5 hover:shadow-[0_8px_24px_rgba(0,0,0,0.12)]"
       }`}
     >
+      <span
+        className="absolute inset-y-3 left-0 w-1 rounded-full"
+        style={{ backgroundColor: accent }}
+        aria-hidden
+      />
+
       {nodeType === "action" && (
-        <Handle type="target" position={Position.Left} className="!bg-primary !h-2.5 !w-2.5" />
+        <Handle
+          type="target"
+          position={Position.Left}
+          className="h-3! w-3! border-2! border-background! bg-primary!"
+        />
       )}
-      <div
-        className="flex items-center gap-2 rounded-t-[10px] px-3 py-2"
-        style={{ backgroundColor: `${def?.color ?? "#64748b"}18` }}
-      >
-        <NodeAppIcon app={app} size={20} />
+
+      <div className="flex items-center gap-2.5 px-3.5 pb-1.5 pt-3">
+        <span
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-border/70"
+          style={{ backgroundColor: `${accent}14` }}
+        >
+          <NodeAppIcon app={app} size={20} />
+        </span>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-semibold leading-tight">{d.label}</p>
-          <p className="text-[10px] capitalize text-muted-foreground">{nodeType}</p>
+          <p className="truncate text-[13px] font-semibold leading-tight">
+            {d.label}
+          </p>
+          <p className="mt-0.5 flex items-center gap-1 text-[10px] text-muted-foreground">
+            <span
+              className="inline-block h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: accent }}
+              aria-hidden
+            />
+            {nodeType === "trigger" ? "Trigger" : "Action"}
+          </p>
         </div>
       </div>
-      {nodeSubtitle(d) && (
-        <p className="border-t border-border px-3 py-1.5 text-[10px] text-muted-foreground line-clamp-2">
-          {nodeSubtitle(d)}
+
+      {subtitle && (
+        <p className="px-3.5 pb-2 text-[10px] leading-snug text-muted-foreground line-clamp-2">
+          {subtitle}
         </p>
       )}
-      {nodeType === "trigger" && (
-        <Handle type="source" position={Position.Right} className="!bg-primary !h-2.5 !w-2.5" />
+
+      {chips.length > 0 && (
+        <div className="flex flex-wrap gap-1 border-t border-border/70 px-3.5 py-2">
+          {chips.map((chip) => (
+            <span
+              key={chip}
+              className="max-w-full truncate rounded-md bg-muted px-1.5 py-0.5 text-[9px] font-medium text-muted-foreground"
+            >
+              {chip}
+            </span>
+          ))}
+        </div>
       )}
-      {nodeType === "action" && (
-        <Handle type="source" position={Position.Right} className="!bg-primary !h-2.5 !w-2.5" />
-      )}
+
+      <Handle
+        type="source"
+        position={Position.Right}
+        className="h-3! w-3! border-2! border-background! bg-primary!"
+      />
     </div>
   );
 }

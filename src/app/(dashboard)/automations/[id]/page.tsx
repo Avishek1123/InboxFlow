@@ -8,7 +8,7 @@ export default async function AutomationEditorPage({ params }: Props) {
   const { organization } = await requireOrganization();
 
   return (
-    <div className="mx-auto w-full max-w-7xl">
+    <div className="mx-auto w-full max-w-[1700px]">
       <AutomationBuilder organizationId={organization.id} automationId={id} />
     </div>
   );
