@@ -42,6 +42,13 @@ export type StudioJob = {
   };
   /** User clicked "Enable auto-sync" in the studio UI. */
   autosyncConfirmed?: boolean;
+  /** Incremental progress for the collect_data step (chunked across requests). */
+  collect?: {
+    gmailSynced: boolean;
+    messagesFetched: number;
+    extracted: number;
+    processed: number;
+  };
   graph?: WorkflowGraph;
   tableId?: string;
   tableName?: string;

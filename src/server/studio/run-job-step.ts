@@ -3,11 +3,13 @@ import { buildGmailReconnectUrl } from "@/lib/gmail/reconnect-url";
 import { hasGoogleSheetsScopes } from "@/lib/gmail/scopes";
 import { generateWorkflowFromPrompt } from "@/server/agent";
 import { getGmailTokenHealth } from "@/server/google/gmail-token-health";
-import { collectStarredMailToTable } from "@/server/google-sheets/collect-starred-mail-to-table";
+import {
+  extractTableBatchForStudio,
+  syncStarredGmailForStudio,
+} from "@/server/google-sheets/collect-starred-mail-to-table";
 import { installSheetExportTrigger } from "@/server/google-sheets/install-sheet-export-trigger";
 import { provisionGoogleSheetExport } from "@/server/google-sheets/provision-sheet";
 import { pushSheetExportDataFromServer } from "@/server/google-sheets/push-sheet-export-data";
-import { syncStarredMailToSheet } from "@/server/google-sheets/sync-starred-mail-to-sheet";
 import { getGoogleAuthClientForOrganization } from "@/server/google/auth-client";
 import { ensureSheetsOAuthClient } from "@/server/google/ensure-sheets-auth";
 import { automationRepository } from "@/server/repositories/automation.repository";
@@ -205,19 +207,73 @@ export async function continueStudioJob(params: {
       );
     } else if (task.id === "collect_data") {
       if (!job.tableId) throw new Error("Table missing before data collect");
-      const collected = await collectStarredMailToTable({
-        organizationId: job.organizationId,
-        tableId: job.tableId,
-        starredOnly: job.plan.starredOnly,
-      });
+
+      // Chunked across requests so no single serverless invocation times out.
+      // Request 1: Gmail sync only. Requests 2..n: small AI-extract batches
+      // within a time budget; client keeps calling while status is "running".
+      if (!job.collect?.gmailSynced) {
+        const synced = await syncStarredGmailForStudio({
+          organizationId: job.organizationId,
+          starredOnly: job.plan.starredOnly,
+        });
+        job.collect = {
+          gmailSynced: true,
+          messagesFetched: synced.messagesFetched,
+          extracted: 0,
+          processed: 0,
+        };
+        markTask(
+          job,
+          task.id,
+          "running",
+          synced.messagesFetched > 0
+            ? `Fetched ${synced.messagesFetched} starred emails — extracting…`
+            : "Checking for starred emails…"
+        );
+        job.status = "running";
+        await saveStudioJob(job);
+        return publicStudioJob(job);
+      }
+
+      const collect = job.collect;
+      // Stay well under Vercel's function limit; leftover work continues on
+      // the next request because the client loops while status is "running".
+      const deadline = Date.now() + 25_000;
+      let exhausted = false;
+      while (Date.now() < deadline) {
+        const round = await extractTableBatchForStudio({
+          organizationId: job.organizationId,
+          tableId: job.tableId,
+          batchSize: 6,
+        });
+        collect.processed += round.processed;
+        collect.extracted += round.succeeded;
+        if (round.succeeded === 0) {
+          exhausted = true;
+          break;
+        }
+      }
+
+      if (!exhausted) {
+        markTask(
+          job,
+          task.id,
+          "running",
+          `Extracting with AI… ${collect.extracted} rows so far`
+        );
+        job.status = "running";
+        await saveStudioJob(job);
+        return publicStudioJob(job);
+      }
+
       markTask(
         job,
         task.id,
         "done",
-        collected.extracted > 0
-          ? `Collected ${collected.extracted} rows from ${collected.messagesFetched} starred emails`
-          : collected.messagesFetched > 0
-            ? `Fetched ${collected.messagesFetched} starred emails — extraction wrote 0 rows (check AI keys / rate limits)`
+        collect.extracted > 0
+          ? `Collected ${collect.extracted} rows from ${collect.messagesFetched} starred emails`
+          : collect.messagesFetched > 0
+            ? `Fetched ${collect.messagesFetched} starred emails — extraction wrote 0 rows (check AI keys / rate limits)`
             : "No starred Gmail found yet — you can star emails and sync later"
       );
     } else if (task.id === "create_sheet") {
@@ -371,18 +427,19 @@ export async function continueStudioJob(params: {
         1
       );
 
-      // Seed sheet immediately; timer keeps it fresh in Google.
+      // Seed sheet with already-extracted rows; the 1-min Apps Script timer
+      // handles fresh Gmail + extraction from here (keep this request short).
       let rowCount = 0;
       try {
-        const synced = await syncStarredMailToSheet({
+        const pushed = await pushSheetExportDataFromServer({
           organizationId: job.organizationId,
           exportId: job.exportId,
-          starredOnly: job.plan.starredOnly,
+          skipPrepare: true,
         });
-        rowCount = synced.rowCount;
+        rowCount = pushed.rowCount;
       } catch (err) {
         console.warn(
-          "[studio] seed sync after Apps Script:",
+          "[studio] seed push after Apps Script:",
           err instanceof Error ? err.message : err
         );
       }

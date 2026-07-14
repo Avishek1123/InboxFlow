@@ -1,19 +1,15 @@
 import { syncGmailAccount } from "@/server/gmail/sync";
-import { backfillMissingTableRows } from "@/server/extraction-tables/backfill-missing-rows";
+import { populateTableFromInbox } from "@/server/extraction-tables/populate-from-inbox";
 import { gmailRepository } from "@/server/repositories/gmail.repository";
 
 /**
- * Pull starred Gmail into InboxFlow and AI-extract into a table (no sheet required yet).
+ * Phase 1 of studio data collection: pull starred Gmail into InboxFlow.
+ * Kept separate from extraction so each serverless request stays short.
  */
-export async function collectStarredMailToTable(params: {
+export async function syncStarredGmailForStudio(params: {
   organizationId: string;
-  tableId: string;
   starredOnly?: boolean;
-}): Promise<{
-  messagesFetched: number;
-  extracted: number;
-  processed: number;
-}> {
+}): Promise<{ messagesFetched: number }> {
   const account = await gmailRepository.findGmailAccount(params.organizationId);
   if (!account || account.status !== "ACTIVE") {
     throw new Error("Connect Google first");
@@ -31,16 +27,34 @@ export async function collectStarredMailToTable(params: {
 
   // Reload so sync uses updated filters
   const fresh = (await gmailRepository.findGmailAccount(params.organizationId))!;
-  const syncResult = await syncGmailAccount(fresh, { bypassLock: true });
-  const extraction = await backfillMissingTableRows(
+  const syncResult = await syncGmailAccount(fresh, {
+    bypassLock: true,
+    // Keep this serverless request short; extraction runs in later requests
+    // and the 1-min Apps Script timer keeps pulling anything beyond the cap.
+    maxMessages: 100,
+    skipPipeline: true,
+  });
+  return { messagesFetched: syncResult.stats.messagesFetched };
+}
+
+/**
+ * Phase 2 of studio data collection: AI-extract one small batch of synced
+ * messages into the table. Callers loop within their own time budget and
+ * stop when `succeeded === 0` (nothing left to extract).
+ */
+export async function extractTableBatchForStudio(params: {
+  organizationId: string;
+  tableId: string;
+  batchSize?: number;
+}): Promise<{ processed: number; succeeded: number; failed: number }> {
+  const result = await populateTableFromInbox(
     params.tableId,
     params.organizationId,
-    { maxRounds: 8, batchSize: 40 }
+    { fillMissing: true, limit: params.batchSize ?? 10 }
   );
-
   return {
-    messagesFetched: syncResult.stats.messagesFetched,
-    extracted: extraction.succeeded,
-    processed: extraction.processed,
+    processed: result.processed,
+    succeeded: result.succeeded,
+    failed: result.failed,
   };
 }

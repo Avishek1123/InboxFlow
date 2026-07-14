@@ -27,7 +27,13 @@ export type SyncResult = {
 
 export async function syncGmailAccount(
   account: ConnectedAccount,
-  options?: { bypassLock?: boolean }
+  options?: {
+    bypassLock?: boolean;
+    /** Cap messages fetched this run (serverless time budget). */
+    maxMessages?: number;
+    /** Skip the post-sync AI extraction pipeline (caller extracts itself). */
+    skipPipeline?: boolean;
+  }
 ): Promise<SyncResult> {
   const { batchSize, lockTtlMinutes } = getGmailSyncConfig();
   const lockId = randomUUID();
@@ -93,7 +99,8 @@ export async function syncGmailAccount(
   try {
     const gmail = await getGmailClientForAccount(account);
     const { backfillMax } = getGmailSyncConfig();
-    const collected = await collectMessageIds(gmail, account, backfillMax);
+    const maxIds = Math.min(backfillMax, options?.maxMessages ?? backfillMax);
+    const collected = await collectMessageIds(gmail, account, maxIds);
     const externalIds = collected.externalIds;
     stats.messagesFetched = externalIds.length;
 
@@ -139,6 +146,7 @@ export async function syncGmailAccount(
     const linkedSheets =
       (await sheetExportRepository.list(account.organizationId)).length > 0;
     if (
+      !options?.skipPipeline &&
       pipelineConfig.enabled &&
       linkedSheets &&
       (pipelineMessageIds.length > 0 || stats.messagesFetched > 0)
