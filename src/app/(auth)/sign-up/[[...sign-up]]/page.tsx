@@ -7,11 +7,16 @@ export const metadata = { title: "Sign up" };
 
 export default function SignUpPage() {
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       <div className="text-center">
-        <h1 className="text-xl font-semibold">Create account</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Works with Indian +91 phone numbers
+        <p className="font-[family-name:var(--font-marketing-display)] text-[10px] font-semibold uppercase tracking-[0.3em] text-zinc-500 dark:text-violet-300/80">
+          Start free
+        </p>
+        <h1 className="mt-2 font-[family-name:var(--font-marketing-display)] text-2xl font-semibold tracking-tight">
+          Create your account
+        </h1>
+        <p className="mt-1.5 text-sm text-muted-foreground">
+          Automate Gmail, WhatsApp & Sheets with AI in minutes
         </p>
       </div>
       {isFirebaseConfigured() ? (
@@ -21,7 +26,10 @@ export default function SignUpPage() {
       )}
       <p className="text-center text-sm text-muted-foreground">
         Already have an account?{" "}
-        <Link href="/sign-in" className="text-primary underline">
+        <Link
+          href="/sign-in"
+          className="font-semibold text-foreground underline underline-offset-4 hover:opacity-80"
+        >
           Sign in
         </Link>
       </p>
