@@ -47,7 +47,7 @@ export async function completeWithFallback(
   const priority = getConfiguredAiProviders();
   if (priority.length === 0) {
     throw new AiConfigError(
-      "No AI provider configured. Set GROQ_API_KEY, GEMINI_API_KEY, or OPENROUTER_API_KEY."
+      "No AI provider configured. Set GROQ_API_KEY (and optional GROQ_API_KEY_2), GEMINI_API_KEY, or OPENROUTER_API_KEY."
     );
   }
 

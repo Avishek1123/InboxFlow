@@ -8,6 +8,10 @@ const envSchema = z.object({
 
   // AI providers (at least one required for AI features)
   GROQ_API_KEY: z.string().optional(),
+  /** Fallback Groq key when the primary hits 429 / daily limits */
+  GROQ_API_KEY_2: z.string().optional(),
+  /** Optional comma-separated Groq keys (tried in order after KEY / KEY_2) */
+  GROQ_API_KEYS: z.string().optional(),
   GROQ_MODEL: z.string().default("llama-3.1-8b-instant"),
   GEMINI_API_KEY: z.string().optional(),
   GEMINI_MODEL: z.string().default("gemini-2.5-flash-lite"),
@@ -50,9 +54,22 @@ export function getConfiguredAiProviders(): Array<
     .filter(Boolean) as Array<"groq" | "gemini" | "openrouter">;
 
   return priority.filter((name) => {
-    if (name === "groq") return Boolean(env.GROQ_API_KEY);
+    if (name === "groq") return getGroqApiKeys().length > 0;
     if (name === "gemini") return Boolean(env.GEMINI_API_KEY);
     if (name === "openrouter") return Boolean(env.OPENROUTER_API_KEY);
     return false;
   });
+}
+
+/** Ordered unique Groq API keys for failover on rate limits. */
+export function getGroqApiKeys(): string[] {
+  const env = getEnv();
+  const fromList = (env.GROQ_API_KEYS ?? "")
+    .split(",")
+    .map((k) => k.trim())
+    .filter(Boolean);
+  const keys = [env.GROQ_API_KEY, env.GROQ_API_KEY_2, ...fromList]
+    .map((k) => k?.trim() ?? "")
+    .filter(Boolean);
+  return [...new Set(keys)];
 }

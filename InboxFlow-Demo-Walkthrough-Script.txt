@@ -1,0 +1,396 @@
+================================================================================
+InboxFlow — Product Demo Walkthrough Script
+Working title: From Conversations to Structured Work
+Target length: 4:00–5:30
+Tone: Clear, confident, product-demo (not hype)
+================================================================================
+
+
+--------------------------------------------------------------------------------
+PRE-PRODUCTION SETUP (before you record)
+--------------------------------------------------------------------------------
+
+Prepare these accounts and assets:
+- Clean browser (incognito or logged-out) for Scene 2
+- Connected Gmail + Google Sheets (+ WhatsApp if available)
+- 2–3 sample emails ready to send / mark for demo
+- A sheet already linked to a workflow
+- Soft BGM under VO; duck music when speaking
+
+On-screen captions: Keep short — product name, scene title, key field labels.
+
+
+================================================================================
+SCENE 1 — LANDING PAGE
+Duration: 0:00–0:45
+Visual: Full landing page (hero → features → benefits → CTA). Slow scroll.
+================================================================================
+
+VOICEOVER:
+
+Welcome to InboxFlow — AI workflow automation for modern businesses.
+
+Every day, teams drown in emails, WhatsApp messages, and inbound inquiries.
+Someone has to read each message, pull out the important details, and type
+them into spreadsheets or a CRM. That’s slow, inconsistent, and easy to get wrong.
+
+InboxFlow removes that manual loop.
+
+Our AI understands incoming conversations, extracts the fields you care about,
+and writes them into structured systems — automatically, in seconds.
+
+Let’s see how it works.
+
+VISUAL ACTIONS:
+  0:00–0:08  Hero: brand + headline in frame
+  0:08–0:22  Hold on hero CTA; cursor rests near Start Free
+  0:22–0:38  Smooth scroll: features → benefits
+  0:38–0:45  End on primary CTA; cut to Scene 2
+
+ON-SCREEN TEXT (optional):
+  Conversations in → Structured work out
+
+
+================================================================================
+SCENE 2 — SIGN UP & ONBOARDING
+Duration: 0:45–1:25
+Visual: Auth pages → Google OAuth → integrations
+================================================================================
+
+VOICEOVER:
+
+Getting started takes minutes.
+
+Create an account with email, or continue with Google in one click.
+
+After you’re signed in, connect the tools you already use — Gmail for email,
+WhatsApp for messaging, and Google Sheets for structured storage.
+
+Once permissions are granted, InboxFlow is ready to automate the work that
+used to live in your inbox.
+
+VISUAL ACTIONS:
+  0:45–0:55  /sign-up — form + Continue with Google
+  0:55–1:05  Brief cut to /sign-in (show both paths exist)
+  1:05–1:15  Google OAuth popup — approve scopes
+  1:15–1:25  Integrations: Gmail, WhatsApp, Sheets status “Connected”
+
+NOTES:
+  - Don’t linger on error states.
+  - Prefer Google OAuth on camera — fastest path.
+
+
+================================================================================
+SCENE 3 — DASHBOARD OVERVIEW
+Duration: 1:25–1:55
+Visual: Main app shell after login
+================================================================================
+
+VOICEOVER:
+
+After login, you land in your workspace.
+
+Everything is organized around three pillars:
+
+  1. Prompt Studio — where you define what the AI should understand.
+  2. Workflow Builder — where you decide what happens next.
+  3. Settings & Integrations — where you manage connections and configuration.
+
+Together, they control how InboxFlow reads messages, extracts meaning, and
+stores structured data.
+
+VISUAL ACTIONS:
+  1:25–1:35  Overview / home — open nav once
+  1:35–1:50  Hover or click each of the three areas
+             (Create / Automations / Settings)
+  1:50–1:55  Show any stats chips available (or skip if not in UI)
+
+ON-SCREEN CALLOUTS:
+  1. Prompt Studio
+  2. Workflow Builder
+  3. Settings & Integrations
+
+NOTE:
+  If your UI says “Ask AI” / “Automations”, keep the names that appear on screen
+  and say “Prompt Studio” over that screen.
+
+
+================================================================================
+SCENE 4 — PROMPT STUDIO
+Duration: 1:55–2:50
+Visual: Ask AI / Create Studio — prompt editor + test
+================================================================================
+
+VOICEOVER:
+
+This is Prompt Studio — the intelligence layer of the platform.
+
+Here you tell the AI exactly what to pull from emails and WhatsApp messages.
+
+For example: customer name, phone number, email, product interest, quantity,
+budget, priority, and a short summary — returned as clean, structured data.
+
+You can test a prompt instantly before you roll it into a live workflow.
+
+VISUAL ACTIONS:
+  1:55–2:10  Open Prompt Studio; type / paste extraction prompt slowly
+  2:10–2:20  Highlight columns / fields list
+  2:20–2:40  Paste sample message and run test / extraction
+  2:40–2:50  Show structured output fields populated
+
+DEMO INPUT (on screen):
+  Hi, I need 100 office chairs for my company.
+  My budget is ₹1 lakh. Please contact me at 9876543210.
+
+DEMO OUTPUT (show filled fields):
+  Customer Name   — (from sender / context)
+  Phone Number    — 9876543210
+  Product         — Office chairs
+  Quantity        — 100
+  Budget          — ₹1,00,000
+  Priority        — High / Medium
+
+CLOSING LINE (VO):
+  That way the AI extracts exactly what your business needs — nothing more,
+  nothing less.
+
+
+================================================================================
+SCENE 5 — WORKFLOW BUILDER
+Duration: 2:50–3:40
+Visual: Automations canvas — zoomed large (setup collapsed to corner)
+================================================================================
+
+VOICEOVER:
+
+Next: the Workflow Builder.
+
+This is where you decide what happens after the AI extracts the data.
+
+A typical flow looks like this:
+  A Gmail trigger starts the run.
+  AI extraction structures the message.
+  Optional validation checks the fields.
+  Google Sheets is updated.
+  Your team can get a notification.
+
+When a new message arrives, the workflow runs on its own — no copy-paste,
+no waiting for someone to update a sheet.
+
+Start simple, or grow into multi-step automations — without writing code.
+
+VISUAL ACTIONS:
+  2:50–3:05  Open workflow; zoom so nodes fill the canvas
+  3:05–3:20  Trace path with cursor: Trigger → Extract → Sheet → (notify)
+  3:20–3:35  Click Test run or show a recent successful run
+  3:35–3:40  Brief highlight of Live status
+
+ON-SCREEN FLOW GRAPHIC (optional overlay):
+  Gmail Trigger
+      ↓
+  AI Extraction
+      ↓
+  Validation (optional)
+      ↓
+  Google Sheet Update
+      ↓
+  Team Notification (optional)
+
+
+================================================================================
+SCENE 6 — SETTINGS & INTEGRATIONS
+Duration: 3:40–4:10
+Visual: Integrations / settings screens
+================================================================================
+
+VOICEOVER:
+
+Settings and Integrations keep everything under control.
+
+Manage connected services — Gmail, WhatsApp, Google Sheets, and more.
+Configure how AI behaves for your workspace.
+Review security, permissions, and OAuth connections.
+
+Everything you need to customize and scale automation lives in one place.
+
+VISUAL ACTIONS:
+  3:40–3:55  Integrations: Connected / Needed for Gmail, WhatsApp, Sheets
+  3:55–4:05  Any AI / security settings that exist in product
+  4:05–4:10  Return to connected services list
+
+NOTE:
+  Only show features that exist in the product. If Slack / CRM / temperature
+  controls aren’t live, don’t invent them — say “notifications and other team
+  tools as you connect them.”
+
+
+================================================================================
+SCENE 7 — REAL BUSINESS EXAMPLE (hero moment)
+Duration: 4:10–5:00
+Visual: Inbox → extraction → sheet row appears
+================================================================================
+
+VOICEOVER:
+
+Here’s a real workflow in action.
+
+A customer writes in:
+They’re looking for 500 chairs for a new office. Budget: ₹2 lakh.
+Contact: Rahul Sharma.
+
+InboxFlow analyzes the message immediately.
+Name, product, quantity, budget, and priority are extracted and structured.
+Then the workflow writes a new row into Google Sheets.
+
+No manual data entry. No copy-pasting. No waiting overnight.
+
+VISUAL ACTIONS:
+  4:10–4:25  Show the email open (or WhatsApp bubble) — readable full text
+  4:25–4:40  Cut to AI extracting fields
+  4:40–4:55  Google Sheet: new row appears
+  4:55–5:00  Zoom sheet row — hold
+
+SAMPLE MESSAGE (on screen):
+  Hello,
+
+  We are looking for 500 chairs for our new office.
+  Budget is ₹2 lakh. Please share pricing details.
+
+  Regards,
+  Rahul Sharma
+
+EXTRACTED ROW:
+  Customer Name  — Rahul Sharma
+  Product        — Chairs
+  Quantity       — 500
+  Budget         — ₹2,00,000
+  Priority       — High
+
+PRODUCTION TIP:
+  If Apps Script sync needs ~1 minute, either:
+  - Use Sync now once and say “the sheet updates automatically,” or
+  - Cut with a “~1 minute later” title card after sending the mail.
+
+
+================================================================================
+SCENE 8 — ANALYTICS & VISIBILITY
+Duration: 5:00–5:25
+Visual: Recent runs / dashboard metrics (what exists in UI)
+================================================================================
+
+VOICEOVER:
+
+Every run is tracked.
+
+You can see what processed successfully, where something failed, and how your
+automations perform over time.
+
+Teams get visibility — not a black box.
+
+VISUAL ACTIONS:
+  5:00–5:15  Workflow inspector: recent runs with success status
+  5:15–5:25  Any overview stats; otherwise hold on a successful run
+
+METRICS TO MENTION (only if visible):
+  - Messages / executions processed
+  - Success rate
+  - Last run time
+
+
+================================================================================
+SCENE 9 — CLOSING
+Duration: 5:25–5:50
+Visual: Landing CTA or product ready screen → logo end card
+================================================================================
+
+VOICEOVER:
+
+InboxFlow turns unstructured communication into structured business data —
+automatically.
+
+Connect your channels.
+Shape the AI with clear prompts.
+Build workflows that update Sheets and keep your team moving.
+
+The result: faster operations, less manual work, cleaner data, and automation
+that scales with your business.
+
+Start with InboxFlow. Conversations in. Structured work out.
+
+VISUAL ACTIONS:
+  5:25–5:40  Back to landing CTA Start Free
+  5:40–5:50  End card: logo + URL + Start Free
+
+END CARD TEXT:
+  InboxFlow
+  Conversations in · Structured work out
+  [your-domain]  ·  Start Free
+
+
+================================================================================
+CONDENSED VO-ONLY SCRIPT (TELEPROMPTER)
+================================================================================
+
+Welcome to InboxFlow — AI workflow automation for modern businesses.
+Teams drown in emails and WhatsApp every day. Someone has to read each message
+and type details into spreadsheets. InboxFlow removes that loop.
+AI understands messages, extracts what matters, and stores structured data —
+in seconds.
+Let's see how it works.
+
+Getting started takes minutes — email or Google sign-in —
+then connect Gmail, WhatsApp, and Google Sheets. Permissions on, and you're ready.
+
+Your workspace has three pillars: Prompt Studio, Workflow Builder,
+and Settings & Integrations. Together they control how AI reads, processes,
+and stores data.
+
+In Prompt Studio, you define the fields — name, phone, product, quantity,
+budget, priority.
+Test a sample message and see structured results instantly.
+
+In the Workflow Builder, connect trigger to AI extraction to Google Sheets —
+and optional team notifications. New message arrives, the flow runs. No code.
+
+Settings keep Gmail, WhatsApp, Sheets, AI behavior, and security in one place.
+
+Here's a real example: Rahul needs 500 chairs, budget two lakh.
+AI extracts the fields. Sheets updates. No copy-paste. No waiting.
+
+Every run is tracked so your team sees what worked.
+
+Connect channels. Shape prompts. Build workflows.
+Faster ops, less manual work, cleaner data — powered by AI.
+InboxFlow. Conversations in. Structured work out.
+
+
+================================================================================
+SHOT LIST (EDIT ORDER)
+================================================================================
+
+1. Landing hero → scroll features/benefits → CTA
+2. Sign-up / Google OAuth → connected integrations
+3. App nav overview (three pillars)
+4. Prompt Studio: prompt + test message + fields
+5. Workflow canvas: nodes + Live + test run
+6. Settings / integrations
+7. Email → extraction → sheet row (money shot)
+8. Recent runs / metrics
+9. Landing CTA + end card
+
+
+================================================================================
+DON’T SAY / DON’T SHOW
+================================================================================
+
+- Don’t invent Slack, CRM, temperature knobs, or analytics charts if they
+  aren’t in the product yet.
+- Don’t mention “starred email only” unless that screen is literally the
+  demo path.
+- Don’t show failed OAuth or error toasts.
+- Don’t keep the oversized setup panel open on the workflow canvas —
+  keep the graph big.
+
+================================================================================
+END OF SCRIPT
+================================================================================

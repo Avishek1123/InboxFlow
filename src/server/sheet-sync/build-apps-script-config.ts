@@ -29,11 +29,12 @@ export function buildAppsScriptConfig(params: {
 export function resolveAppsScriptGroqKey(): string {
   const key =
     process.env.APPS_SCRIPT_GROQ_API_KEY?.trim() ||
+    process.env.GROQ_API_KEY_2?.trim() ||
     process.env.GROQ_API_KEY?.trim() ||
     "";
   if (!key) {
     throw new Error(
-      "Set GROQ_API_KEY (or APPS_SCRIPT_GROQ_API_KEY) so the sheet script can structure emails with AI."
+      "Set GROQ_API_KEY / GROQ_API_KEY_2 (or APPS_SCRIPT_GROQ_API_KEY) so the sheet script can structure emails with AI."
     );
   }
   return key;
