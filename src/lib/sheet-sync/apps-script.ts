@@ -11,7 +11,7 @@ export type AppsScriptColumn = {
 
 /**
  * Config for a self-contained sheet script:
- * Gmail starred → Gemini AI → write rows.
+ * Gmail starred → Groq AI → write rows.
  * Does NOT call the InboxFlow server.
  */
 export type AppsScriptConfig = {
@@ -20,9 +20,9 @@ export type AppsScriptConfig = {
   triggerMinutes?: number;
   /** Columns the AI must fill (from the Studio table). */
   columns: AppsScriptColumn[];
-  /** Gemini API key embedded at install time (UrlFetch from Apps Script). */
-  geminiApiKey: string;
-  geminiModel?: string;
+  /** Groq API key embedded at install time (UrlFetch from Apps Script). */
+  groqApiKey: string;
+  groqModel?: string;
   /** How many starred threads to scan each run. */
   maxThreads?: number;
   /**
@@ -32,6 +32,10 @@ export type AppsScriptConfig = {
   apiKey?: string;
   tableId?: string;
   gmailFilter?: string;
+  /** @deprecated use groqApiKey */
+  geminiApiKey?: string;
+  /** @deprecated use groqModel */
+  geminiModel?: string;
 };
 
 /** Required by projects.updateContent — file name must be "appsscript", type JSON. */
@@ -61,16 +65,18 @@ function escapeJsSingleQuoted(value: string): string {
 
 /**
  * Container-bound Apps Script on the user's spreadsheet.
- * Runs every N minutes in Google's cloud — no InboxFlow server required.
+ * Runs every N minutes in Google's cloud — uses Groq for AI extraction.
  */
 export function buildGoogleAppsScript(config: AppsScriptConfig): string {
   const sheetTitle = escapeJsSingleQuoted(config.sheetTitle);
   const triggerMinutes = Math.max(1, Math.min(60, config.triggerMinutes ?? 1));
   const maxThreads = Math.max(5, Math.min(50, config.maxThreads ?? 20));
-  const geminiModel = escapeJsSingleQuoted(
-    config.geminiModel?.trim() || "gemini-2.5-flash-lite"
+  const groqKey = escapeJsSingleQuoted(
+    (config.groqApiKey || config.geminiApiKey || "").trim()
   );
-  const geminiKey = escapeJsSingleQuoted(config.geminiApiKey.trim());
+  const groqModel = escapeJsSingleQuoted(
+    (config.groqModel || config.geminiModel || "llama-3.1-8b-instant").trim()
+  );
 
   const columnsJson = JSON.stringify(
     config.columns.map((c) => ({
@@ -86,16 +92,15 @@ export function buildGoogleAppsScript(config: AppsScriptConfig): string {
  *
  * Every ${triggerMinutes} min this script:
  *   1) Reads YOUR starred Gmail (GmailApp)
- *   2) Calls Gemini to structure fields into your columns
+ *   2) Calls Groq AI to structure fields into your columns
  *   3) Writes / updates rows in this spreadsheet
  *
- * InboxFlow's server is NOT called. Keep this script linked to GCP ${INBOXFLOW_GCP_PROJECT_NUMBER}
- * if Google asks (Apps Script → Project settings → Google Cloud Platform project).
+ * Primary auto-sync is also driven from the InboxFlow website (server keep-alive).
  */
 var INBOXFLOW_CONFIG = {
   SHEET_TITLE: '${sheetTitle}',
-  GEMINI_API_KEY: '${geminiKey}',
-  GEMINI_MODEL: '${geminiModel}',
+  GROQ_API_KEY: '${groqKey}',
+  GROQ_MODEL: '${groqModel}',
   MAX_THREADS: ${maxThreads},
   COLUMNS: ${columnsJson},
   ID_HEADER: 'Message ID',
@@ -155,13 +160,13 @@ function plainBody_(message) {
   try {
     var body = message.getPlainBody() || '';
     if (!body) body = message.getBody().replace(/<[^>]+>/g, ' ');
-    return String(body).slice(0, 8000);
+    return String(body).slice(0, 6000);
   } catch (e) {
     return '';
   }
 }
 
-function extractWithGemini_(fromAddr, subject, bodyText) {
+function extractWithGroq_(fromAddr, subject, bodyText) {
   var cols = INBOXFLOW_CONFIG.COLUMNS;
   var fieldLines = [];
   for (var i = 0; i < cols.length; i++) {
@@ -181,41 +186,70 @@ function extractWithGemini_(fromAddr, subject, bodyText) {
     '\\n\\n' +
     bodyText;
 
-  var url =
-    'https://generativelanguage.googleapis.com/v1beta/models/' +
-    encodeURIComponent(INBOXFLOW_CONFIG.GEMINI_MODEL) +
-    ':generateContent?key=' +
-    encodeURIComponent(INBOXFLOW_CONFIG.GEMINI_API_KEY);
-
+  var url = 'https://api.groq.com/openai/v1/chat/completions';
   var res = UrlFetchApp.fetch(url, {
     method: 'post',
     contentType: 'application/json',
+    headers: {
+      Authorization: 'Bearer ' + INBOXFLOW_CONFIG.GROQ_API_KEY,
+    },
     payload: JSON.stringify({
-      contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: {
-        temperature: 0.1,
-        maxOutputTokens: 1024,
-        responseMimeType: 'application/json',
-      },
+      model: INBOXFLOW_CONFIG.GROQ_MODEL,
+      temperature: 0.1,
+      max_tokens: 1024,
+      response_format: { type: 'json_object' },
+      messages: [
+        {
+          role: 'system',
+          content: 'You extract structured JSON from emails. Reply with JSON only.',
+        },
+        { role: 'user', content: prompt },
+      ],
     }),
     muteHttpExceptions: true,
   });
 
   var code = res.getResponseCode();
   var text = res.getContentText();
+  if (code === 429) {
+    // Brief backoff then one retry for Groq TPM limits
+    Utilities.sleep(2000);
+    res = UrlFetchApp.fetch(url, {
+      method: 'post',
+      contentType: 'application/json',
+      headers: {
+        Authorization: 'Bearer ' + INBOXFLOW_CONFIG.GROQ_API_KEY,
+      },
+      payload: JSON.stringify({
+        model: INBOXFLOW_CONFIG.GROQ_MODEL,
+        temperature: 0.1,
+        max_tokens: 1024,
+        response_format: { type: 'json_object' },
+        messages: [
+          {
+            role: 'system',
+            content: 'You extract structured JSON from emails. Reply with JSON only.',
+          },
+          { role: 'user', content: prompt },
+        ],
+      }),
+      muteHttpExceptions: true,
+    });
+    code = res.getResponseCode();
+    text = res.getContentText();
+  }
   if (code !== 200) {
-    throw new Error('Gemini API ' + code + ': ' + text.slice(0, 200));
+    throw new Error('Groq API ' + code + ': ' + text.slice(0, 220));
   }
   var json = JSON.parse(text);
   var part =
-    json.candidates &&
-    json.candidates[0] &&
-    json.candidates[0].content &&
-    json.candidates[0].content.parts &&
-    json.candidates[0].content.parts[0]
-      ? json.candidates[0].content.parts[0].text
+    json.choices &&
+    json.choices[0] &&
+    json.choices[0].message &&
+    json.choices[0].message.content
+      ? json.choices[0].message.content
       : '';
-  if (!part) throw new Error('Gemini returned empty content');
+  if (!part) throw new Error('Groq returned empty content');
   var cleaned = String(part).trim();
   if (cleaned.indexOf('{') !== -1) {
     cleaned = cleaned.substring(cleaned.indexOf('{'), cleaned.lastIndexOf('}') + 1);
@@ -248,12 +282,11 @@ function rowFromMessage_(message, extracted) {
 }
 
 function collectStarredMessages_() {
-  // Paginate Gmail search so we get ALL starred threads, not just the first page.
   var messages = [];
   var seen = {};
   var start = 0;
   var pageSize = 50;
-  var maxPages = 40; // up to ~2000 starred threads
+  var maxPages = 40;
   for (var page = 0; page < maxPages; page++) {
     var threads = GmailApp.search('is:starred', start, pageSize);
     if (!threads || threads.length === 0) break;
@@ -263,12 +296,9 @@ function collectStarredMessages_() {
         var msg = threadMsgs[m];
         var id = msg.getId();
         if (seen[id]) continue;
-        // Prefer the starred message in the thread when possible
         try {
           if (!msg.isStarred()) continue;
-        } catch (eStar) {
-          /* older API — keep message */
-        }
+        } catch (eStar) {}
         seen[id] = true;
         messages.push(msg);
       }
@@ -276,7 +306,6 @@ function collectStarredMessages_() {
     if (threads.length < pageSize) break;
     start += pageSize;
   }
-  // Fallback: if isStarred filter yielded nothing, include all messages from starred threads
   if (messages.length === 0) {
     start = 0;
     for (var page2 = 0; page2 < maxPages; page2++) {
@@ -300,8 +329,8 @@ function collectStarredMessages_() {
 }
 
 function runStandaloneSync_() {
-  if (!INBOXFLOW_CONFIG.GEMINI_API_KEY) {
-    throw new Error('GEMINI_API_KEY missing in script config. Re-install from InboxFlow.');
+  if (!INBOXFLOW_CONFIG.GROQ_API_KEY) {
+    throw new Error('GROQ_API_KEY missing in script config. Re-enable auto-sync from InboxFlow website.');
   }
   var sheet = getDataSheet_();
   ensureHeaders_(sheet);
@@ -322,7 +351,7 @@ function runStandaloneSync_() {
       subject = message.getSubject() || '';
     } catch (e2) {}
     var bodyText = plainBody_(message);
-    var extracted = extractWithGemini_(fromAddr, subject, bodyText);
+    var extracted = extractWithGroq_(fromAddr, subject, bodyText);
     var row = rowFromMessage_(message, extracted);
     if (idMap[id]) {
       sheet.getRange(idMap[id], 1, 1, row.length).setValues([row]);
@@ -332,8 +361,8 @@ function runStandaloneSync_() {
       idMap[id] = sheet.getLastRow();
       written++;
     }
-    // Gentle pacing for Gemini free-tier limits
-    if (i < messages.length - 1) Utilities.sleep(400);
+    // Pace requests for Groq free-tier TPM
+    if (i < messages.length - 1) Utilities.sleep(800);
   }
 
   SpreadsheetApp.flush();
@@ -372,8 +401,6 @@ function recordSyncSuccess_(stats) {
 }
 
 function setupInboxFlowAutomationFromApi() {
-  // Install the timer only — first sync runs on the next tick / Sync now.
-  // Avoids failing setup when Gemini/Gmail scopes are still warming up.
   installInboxFlowTimeTrigger_();
   return inboxFlowTriggerCount_();
 }
@@ -401,7 +428,7 @@ function setupInboxFlowAutomation() {
       'Auto-sync: ON (' +
       triggers +
       ' timer, every ${triggerMinutes} min).\\n' +
-      'Mode: starred Gmail → Gemini AI → this sheet (no InboxFlow server).\\n' +
+      'Mode: starred Gmail → Groq AI → this sheet.\\n' +
       'Tab: "' +
       INBOXFLOW_CONFIG.SHEET_TITLE +
       '".';
@@ -429,8 +456,8 @@ function showInboxFlowStatus() {
   var err = props.getProperty('INBOXFLOW_LAST_ERROR');
   var msg =
     'Timers: ' +
-    (triggers > 0 ? triggers + ' active (every ${triggerMinutes} min)' : 'NONE — Enable auto-sync') +
-    '\\nMode: Gmail starred → Gemini → sheet' +
+    (triggers > 0 ? triggers + ' active (every ${triggerMinutes} min)' : 'NONE — enable from InboxFlow website') +
+    '\\nMode: Gmail starred → Groq → sheet' +
     '\\nTab: ' +
     INBOXFLOW_CONFIG.SHEET_TITLE;
   if (last) msg += '\\nLast sync: ' + last;

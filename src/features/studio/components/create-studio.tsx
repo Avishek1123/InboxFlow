@@ -475,10 +475,10 @@ export function CreateStudio() {
                     Sheet is ready — turn on auto-sync
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Data is collected and your Google Sheet is created. Click
-                    below to activate auto-fetch every{" "}
-                    {job.plan.syncMinutes} minute
-                    {job.plan.syncMinutes === 1 ? "" : "s"}.
+                    Data is in your sheet. Click below to enable auto-fetch from
+                    this website every {job.plan.syncMinutes} minute
+                    {job.plan.syncMinutes === 1 ? "" : "s"} (Groq AI — no need
+                    to open the sheet menu).
                   </p>
                 </div>
                 {job.sheet?.spreadsheetUrl && (

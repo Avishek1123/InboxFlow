@@ -289,70 +289,55 @@ export async function continueStudioJob(params: {
         return publicStudioJob(job);
       }
 
-      if (job.autoSyncOn) {
-        markTask(
-          job,
-          task.id,
-          "done",
-          `Auto-sync on — every ${job.plan.syncMinutes} min`
+      // Website-driven autosync: always turn on InboxFlow server keep-alive
+      // (reliable, uses Groq for AI). Also push the Groq Apps Script + try timer.
+      let scriptTimerOn = false;
+      try {
+        const { account } = await getGoogleAuthClientForOrganization(
+          job.organizationId
         );
-      } else {
-        // Try Apps Script timer; fall back to InboxFlow server keepalive.
-        try {
-          const { account } = await getGoogleAuthClientForOrganization(
-            job.organizationId
-          );
-          const auth = await ensureSheetsOAuthClient(account);
-          const installed = await installSheetExportTrigger({
-            auth,
-            organizationId: job.organizationId,
-            exportId: job.exportId,
-            requestOrigin: params.requestOrigin,
-            repairOnly: false,
-            triggerMinutes: job.plan.syncMinutes,
-          });
-          job.appsScriptId = installed.appsScriptId;
-          if (installed.triggerInstalled) {
-            job.autoSyncOn = true;
-            markTask(
-              job,
-              task.id,
-              "done",
-              `Auto-sync on (sheet timer) — every ${job.plan.syncMinutes} min`
-            );
-          }
-        } catch (err) {
-          console.warn(
-            "[studio] autosync install:",
-            err instanceof Error ? err.message : err
-          );
-        }
-
-        if (!job.autoSyncOn) {
-          try {
-            const synced = await syncStarredMailToSheet({
-              organizationId: job.organizationId,
-              exportId: job.exportId,
-              starredOnly: job.plan.starredOnly,
-            });
-            job.autoSyncOn = true;
-            markTask(
-              job,
-              task.id,
-              "done",
-              `Auto-sync on via InboxFlow — every ${job.plan.syncMinutes} min · ${synced.rowCount} rows`
-            );
-          } catch (err) {
-            job.autoSyncOn = true;
-            markTask(
-              job,
-              task.id,
-              "done",
-              `Auto-sync on via InboxFlow — every ${job.plan.syncMinutes} min (${err instanceof Error ? err.message : "sync deferred"})`
-            );
-          }
-        }
+        const auth = await ensureSheetsOAuthClient(account);
+        const installed = await installSheetExportTrigger({
+          auth,
+          organizationId: job.organizationId,
+          exportId: job.exportId,
+          requestOrigin: params.requestOrigin,
+          repairOnly: false,
+          triggerMinutes: job.plan.syncMinutes,
+        });
+        job.appsScriptId = installed.appsScriptId;
+        scriptTimerOn = Boolean(installed.triggerInstalled);
+      } catch (err) {
+        console.warn(
+          "[studio] sheet script install:",
+          err instanceof Error ? err.message : err
+        );
       }
+
+      let rowCount = 0;
+      try {
+        const synced = await syncStarredMailToSheet({
+          organizationId: job.organizationId,
+          exportId: job.exportId,
+          starredOnly: job.plan.starredOnly,
+        });
+        rowCount = synced.rowCount;
+      } catch (err) {
+        console.warn(
+          "[studio] initial autosync pull:",
+          err instanceof Error ? err.message : err
+        );
+      }
+
+      job.autoSyncOn = true;
+      markTask(
+        job,
+        task.id,
+        "done",
+        scriptTimerOn
+          ? `Auto-sync on — every ${job.plan.syncMinutes} min (website + sheet timer, Groq AI) · ${rowCount} rows`
+          : `Auto-sync on from InboxFlow website — every ${job.plan.syncMinutes} min (Groq AI) · ${rowCount} rows`
+      );
     } else if (task.id === "activate") {
       const graph = await ensureWorkflowGraph(job);
       const wired =

@@ -3,8 +3,8 @@ import type { AppsScriptColumn, AppsScriptConfig } from "@/lib/sheet-sync/apps-s
 export function buildAppsScriptConfig(params: {
   sheetTitle: string;
   columns: AppsScriptColumn[];
-  geminiApiKey: string;
-  geminiModel?: string;
+  groqApiKey: string;
+  groqModel?: string;
   triggerMinutes?: number;
   maxThreads?: number;
   /** @deprecated kept for call-site compatibility */
@@ -15,8 +15,8 @@ export function buildAppsScriptConfig(params: {
   return {
     sheetTitle: params.sheetTitle,
     columns: params.columns,
-    geminiApiKey: params.geminiApiKey,
-    geminiModel: params.geminiModel,
+    groqApiKey: params.groqApiKey,
+    groqModel: params.groqModel,
     triggerMinutes: params.triggerMinutes,
     maxThreads: params.maxThreads,
     apiBaseUrl: params.apiBaseUrl,
@@ -25,24 +25,34 @@ export function buildAppsScriptConfig(params: {
   };
 }
 
-/** Resolve Gemini key for embedding into Apps Script at install time. */
-export function resolveAppsScriptGeminiKey(): string {
+/** Resolve Groq key for embedding into Apps Script at install time. */
+export function resolveAppsScriptGroqKey(): string {
   const key =
-    process.env.APPS_SCRIPT_GEMINI_API_KEY?.trim() ||
-    process.env.GEMINI_API_KEY?.trim() ||
+    process.env.APPS_SCRIPT_GROQ_API_KEY?.trim() ||
+    process.env.GROQ_API_KEY?.trim() ||
     "";
   if (!key) {
     throw new Error(
-      "Set GEMINI_API_KEY (or APPS_SCRIPT_GEMINI_API_KEY) so the sheet script can structure emails with AI."
+      "Set GROQ_API_KEY (or APPS_SCRIPT_GROQ_API_KEY) so the sheet script can structure emails with AI."
     );
   }
   return key;
 }
 
-export function resolveAppsScriptGeminiModel(): string {
+export function resolveAppsScriptGroqModel(): string {
   return (
-    process.env.APPS_SCRIPT_GEMINI_MODEL?.trim() ||
-    process.env.GEMINI_MODEL?.trim() ||
-    "gemini-2.5-flash-lite"
+    process.env.APPS_SCRIPT_GROQ_MODEL?.trim() ||
+    process.env.GROQ_MODEL?.trim() ||
+    "llama-3.1-8b-instant"
   );
+}
+
+/** @deprecated use resolveAppsScriptGroqKey */
+export function resolveAppsScriptGeminiKey(): string {
+  return resolveAppsScriptGroqKey();
+}
+
+/** @deprecated use resolveAppsScriptGroqModel */
+export function resolveAppsScriptGeminiModel(): string {
+  return resolveAppsScriptGroqModel();
 }

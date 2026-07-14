@@ -2,8 +2,8 @@ import { prisma } from "@/server/db";
 import type { AppsScriptColumn, AppsScriptConfig } from "@/lib/sheet-sync/apps-script";
 import {
   buildAppsScriptConfig,
-  resolveAppsScriptGeminiKey,
-  resolveAppsScriptGeminiModel,
+  resolveAppsScriptGroqKey,
+  resolveAppsScriptGroqModel,
 } from "@/server/sheet-sync/build-apps-script-config";
 
 type StoredColumn = {
@@ -38,7 +38,7 @@ export async function loadAppsScriptColumnsForTable(
   return columns;
 }
 
-/** Standalone Gmail → Gemini → sheet script config (no InboxFlow server). */
+/** Standalone Gmail → Groq → sheet script config (no InboxFlow server). */
 export async function buildStandaloneAppsScriptConfig(params: {
   organizationId: string;
   tableId: string;
@@ -52,8 +52,8 @@ export async function buildStandaloneAppsScriptConfig(params: {
   return buildAppsScriptConfig({
     sheetTitle: params.sheetTitle,
     columns,
-    geminiApiKey: resolveAppsScriptGeminiKey(),
-    geminiModel: resolveAppsScriptGeminiModel(),
+    groqApiKey: resolveAppsScriptGroqKey(),
+    groqModel: resolveAppsScriptGroqModel(),
     triggerMinutes: params.triggerMinutes,
     maxThreads: 50,
     tableId: params.tableId,
