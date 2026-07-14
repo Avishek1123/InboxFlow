@@ -25,12 +25,19 @@ export type StudioJob = {
   plan: StudioProductPlan;
   tasks: StudioJobTask[];
   cursor: number;
-  status: "running" | "needs_permission" | "ready" | "failed";
+  status:
+    | "running"
+    | "needs_permission"
+    | "awaiting_autosync"
+    | "ready"
+    | "failed";
   permission?: {
     integration: "GMAIL" | "WHATSAPP" | "TWILIO";
     reconnectUrl: string;
     message: string;
   };
+  /** User clicked "Enable auto-sync" in the studio UI. */
+  autosyncConfirmed?: boolean;
   graph?: WorkflowGraph;
   tableId?: string;
   tableName?: string;
@@ -48,12 +55,11 @@ export type StudioJob = {
 
 const TASK_LABELS: Record<StudioTaskId, string> = {
   plan: "Understand prompt & headings",
-  permissions: "Connect Google (if needed)",
+  permissions: "Connect Google (full access)",
   create_table: "Create data table with headings",
-  create_sheet: "Create Google Sheet",
-  install_script: "Install starred-mail → AI script",
-  enable_autosync: "Enable auto-sync timer",
-  backfill: "Import all starred emails",
+  collect_data: "Collect starred emails & extract data",
+  create_sheet: "Create Google Sheet with your data",
+  enable_autosync: "Enable auto-sync (your click)",
   activate: "Activate product",
 };
 

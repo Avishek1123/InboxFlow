@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { IntegrationCredentialModal } from "@/features/automations/components/integration-credential-modal";
-import { SheetPermissionModal } from "@/features/google-sheets/components/sheet-permission-modal";
 import { StudioTaskProgress } from "@/features/studio/components/studio-task-progress";
 import { useIntegrationStatus } from "@/features/automations/hooks/use-integration-status";
 import type { IntegrationRequirement } from "@/lib/automation/definitions";
@@ -22,7 +21,12 @@ type JobTask = {
 
 type JobSnapshot = {
   id: string;
-  status: "running" | "needs_permission" | "ready" | "failed";
+  status:
+    | "running"
+    | "needs_permission"
+    | "awaiting_autosync"
+    | "ready"
+    | "failed";
   progress?: { done: number; total: number; percent: number };
   tasks: JobTask[];
   permission: {
@@ -109,26 +113,27 @@ export function CreateStudio() {
   const [prompt, setPrompt] = useState(EXAMPLES[0]!);
   const [syncIntervalMinutes, setSyncIntervalMinutes] = useState(1);
   const [phase, setPhase] = useState<
-    "idle" | "building" | "permissions" | "ready" | "testing"
+    | "idle"
+    | "building"
+    | "permissions"
+    | "awaiting_autosync"
+    | "ready"
+    | "testing"
   >("idle");
   const [error, setError] = useState<string | null>(null);
   const [job, setJob] = useState<JobSnapshot | null>(null);
   const [credentialModal, setCredentialModal] =
     useState<IntegrationRequirement | null>(null);
-  const [sheetPermission, setSheetPermission] = useState<{
-    exportId: string;
-    reconnectUrl: string;
-  } | null>(null);
   const { status: integrationStatus, refresh: refreshIntegrations } =
     useIntegrationStatus();
   const [testSteps, setTestSteps] = useState<RunStep[]>([]);
   const [testStatus, setTestStatus] = useState<string | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
+  const [enablingAutosync, setEnablingAutosync] = useState(false);
 
   const jobIdRef = useRef<string | null>(null);
   const advancingRef = useRef(false);
   const cancelledRef = useRef(false);
-  const timerInstalledRef = useRef(false);
 
   const asksForAutoUpdate = useMemo(
     () => promptRequestsSheetAutoUpdate(prompt),
@@ -141,26 +146,20 @@ export function CreateStudio() {
     if (fromPrompt != null) setSyncIntervalMinutes(fromPrompt);
   }, [prompt, asksForAutoUpdate]);
 
-  const applyPermissionUi = useCallback((snap: JobSnapshot) => {
-    if (snap.status !== "needs_permission" || !snap.permission) {
-      setCredentialModal(null);
-      setSheetPermission(null);
+  const applyPausedUi = useCallback((snap: JobSnapshot) => {
+    setCredentialModal(null);
+    if (snap.status === "needs_permission" && snap.permission) {
+      setPhase("permissions");
+      setCredentialModal(snap.permission.integration);
       return;
     }
-    setPhase("permissions");
-    if (snap.permission.integration === "GMAIL" && snap.sheet?.id) {
-      setSheetPermission({
-        exportId: snap.sheet.id,
-        reconnectUrl: snap.permission.reconnectUrl,
-      });
-      setCredentialModal(null);
-    } else {
-      setCredentialModal(snap.permission.integration);
-      setSheetPermission(null);
+    if (snap.status === "awaiting_autosync") {
+      setPhase("awaiting_autosync");
+      return;
     }
   }, []);
 
-  /** Keep calling continue until ready, failed, or needs permission. */
+  /** Keep calling continue until ready, failed, needs permission, or awaiting autosync. */
   const advanceUntilPaused = useCallback(
     async (jobId: string, firstSnap?: JobSnapshot) => {
       if (advancingRef.current) return;
@@ -170,20 +169,12 @@ export function CreateStudio() {
       try {
         let snap = firstSnap;
         if (!snap) {
-          const payload = timerInstalledRef.current
-            ? { timerInstalled: true }
-            : undefined;
-          timerInstalledRef.current = false;
-          snap = await postJson<JobSnapshot>(
-            `/api/v1/studio/jobs/${jobId}`,
-            payload
-          );
+          snap = await postJson<JobSnapshot>(`/api/v1/studio/jobs/${jobId}`);
         }
 
         while (!cancelledRef.current && snap.status === "running") {
           setJob(snap);
           setPhase("building");
-          // Brief pause so the running → done transition is visible
           await sleep(420);
           if (cancelledRef.current) break;
           snap = await postJson<JobSnapshot>(`/api/v1/studio/jobs/${jobId}`);
@@ -194,14 +185,16 @@ export function CreateStudio() {
         setJob(snap);
         jobIdRef.current = snap.id;
 
-        if (snap.status === "needs_permission") {
-          applyPermissionUi(snap);
+        if (
+          snap.status === "needs_permission" ||
+          snap.status === "awaiting_autosync"
+        ) {
+          applyPausedUi(snap);
           return;
         }
         if (snap.status === "ready") {
           setPhase("ready");
           setCredentialModal(null);
-          setSheetPermission(null);
           return;
         }
         if (snap.status === "failed") {
@@ -218,7 +211,7 @@ export function CreateStudio() {
         advancingRef.current = false;
       }
     },
-    [applyPermissionUi]
+    [applyPausedUi]
   );
 
   const build = useCallback(async () => {
@@ -228,11 +221,9 @@ export function CreateStudio() {
     setTestStatus(null);
     setTestError(null);
     setJob(null);
-    setSheetPermission(null);
     setCredentialModal(null);
     jobIdRef.current = null;
     cancelledRef.current = true;
-    // Allow previous loop to exit
     await sleep(50);
     cancelledRef.current = false;
 
@@ -244,8 +235,11 @@ export function CreateStudio() {
       jobIdRef.current = snap.id;
       setJob(snap);
 
-      if (snap.status === "needs_permission") {
-        applyPermissionUi(snap);
+      if (
+        snap.status === "needs_permission" ||
+        snap.status === "awaiting_autosync"
+      ) {
+        applyPausedUi(snap);
         return;
       }
       if (snap.status === "ready") {
@@ -268,7 +262,7 @@ export function CreateStudio() {
     syncIntervalMinutes,
     asksForAutoUpdate,
     advanceUntilPaused,
-    applyPermissionUi,
+    applyPausedUi,
   ]);
 
   const resumeAfterPermission = useCallback(async () => {
@@ -277,15 +271,45 @@ export function CreateStudio() {
       await build();
       return;
     }
-    setSheetPermission(null);
     setCredentialModal(null);
     setPhase("building");
     setError(null);
     await refreshIntegrations();
-    // Short wait so Google token is readable after OAuth
     await sleep(600);
     await advanceUntilPaused(id);
   }, [advanceUntilPaused, build, job?.id, refreshIntegrations]);
+
+  const enableAutosync = useCallback(async () => {
+    const id = jobIdRef.current || job?.id;
+    if (!id) return;
+    setEnablingAutosync(true);
+    setError(null);
+    setPhase("building");
+    try {
+      const snap = await postJson<JobSnapshot>(`/api/v1/studio/jobs/${id}`, {
+        enableAutosync: true,
+      });
+      setJob(snap);
+      jobIdRef.current = snap.id;
+      if (snap.status === "running") {
+        await advanceUntilPaused(id, snap);
+      } else if (snap.status === "ready") {
+        setPhase("ready");
+      } else if (snap.status === "awaiting_autosync") {
+        setPhase("awaiting_autosync");
+      } else if (snap.status === "failed") {
+        setPhase("idle");
+        setError(snap.error || "Could not enable auto-sync");
+      } else {
+        await advanceUntilPaused(id, snap);
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not enable auto-sync");
+      setPhase("awaiting_autosync");
+    } finally {
+      setEnablingAutosync(false);
+    }
+  }, [advanceUntilPaused, job?.id]);
 
   async function runTest() {
     if (!job?.automation?.id) return;
@@ -338,14 +362,16 @@ export function CreateStudio() {
   }
 
   const ready = job?.status === "ready";
+  const awaitingAutosync =
+    job?.status === "awaiting_autosync" || phase === "awaiting_autosync";
 
   return (
     <div className="mx-auto w-full max-w-3xl space-y-6 pb-16">
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Ask AI</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Describe the product. AI plans tasks, asks for Google only when needed,
-          then delivers a sheet that auto-fetches on its own.
+          Connect Google → we collect your data and create the sheet → you click
+          Enable auto-sync when you&apos;re ready.
         </p>
       </header>
 
@@ -390,7 +416,11 @@ export function CreateStudio() {
 
         <button
           type="button"
-          disabled={phase === "building" || prompt.trim().length < 8}
+          disabled={
+            phase === "building" ||
+            enablingAutosync ||
+            prompt.trim().length < 8
+          }
           onClick={() => void build()}
           className="w-full rounded-xl bg-foreground py-3 text-sm font-semibold text-background hover:opacity-90 disabled:opacity-50"
         >
@@ -422,6 +452,7 @@ export function CreateStudio() {
               {job.plan.columnsFromUser ? "Your headings: " : "AI headings: "}
               {job.plan.columns.map((c) => c.label).join(", ")}
             </p>
+
             {job.permission?.message && phase === "permissions" && (
               <div className="mt-3 space-y-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2">
                 <p className="text-xs text-amber-900 dark:text-amber-100">
@@ -432,7 +463,43 @@ export function CreateStudio() {
                   onClick={() => void resumeAfterPermission()}
                   className="rounded-lg bg-foreground px-3 py-1.5 text-xs font-semibold text-background hover:opacity-90"
                 >
-                  Continue build
+                  I’ve connected Google — continue
+                </button>
+              </div>
+            )}
+
+            {awaitingAutosync && (
+              <div className="mt-4 space-y-3 rounded-xl border border-emerald-500/35 bg-emerald-500/5 p-4">
+                <div>
+                  <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">
+                    Sheet is ready — turn on auto-sync
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Data is collected and your Google Sheet is created. Click
+                    below to activate auto-fetch every{" "}
+                    {job.plan.syncMinutes} minute
+                    {job.plan.syncMinutes === 1 ? "" : "s"}.
+                  </p>
+                </div>
+                {job.sheet?.spreadsheetUrl && (
+                  <a
+                    href={job.sheet.spreadsheetUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="block break-all text-xs font-medium text-emerald-700 underline dark:text-emerald-300"
+                  >
+                    {job.sheet.spreadsheetUrl}
+                  </a>
+                )}
+                <button
+                  type="button"
+                  disabled={enablingAutosync}
+                  onClick={() => void enableAutosync()}
+                  className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+                >
+                  {enablingAutosync
+                    ? "Enabling auto-sync…"
+                    : "Enable auto-sync"}
                 </button>
               </div>
             )}
@@ -459,8 +526,6 @@ export function CreateStudio() {
               {job.sheet?.autoSyncOn
                 ? ` · auto-fetch every ${job.sheet.syncMinutes ?? job.plan.syncMinutes} min`
                 : ""}
-              {" · "}
-              no further setup needed
             </p>
           </div>
 
@@ -477,11 +542,6 @@ export function CreateStudio() {
               >
                 {job.sheet.spreadsheetUrl}
               </a>
-              <p className="mt-2 text-[11px] text-muted-foreground">
-                Starred Gmail → Gemini AI → this sheet, every{" "}
-                {job.sheet.syncMinutes ?? job.plan.syncMinutes} min inside Google.
-                You don’t need to keep InboxFlow open or change the sheet.
-              </p>
             </div>
           )}
 
@@ -546,18 +606,6 @@ export function CreateStudio() {
         onConnected={() => void resumeAfterPermission()}
         onCancel={() => setCredentialModal(null)}
       />
-
-      {sheetPermission && (
-        <SheetPermissionModal
-          exportId={sheetPermission.exportId}
-          reconnectUrl={sheetPermission.reconnectUrl}
-          onDone={(result) => {
-            timerInstalledRef.current = result.installed;
-            void resumeAfterPermission();
-          }}
-          onCancel={() => setSheetPermission(null)}
-        />
-      )}
     </div>
   );
 }

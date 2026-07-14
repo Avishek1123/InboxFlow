@@ -14,10 +14,9 @@ export type StudioTaskId =
   | "plan"
   | "permissions"
   | "create_table"
+  | "collect_data"
   | "create_sheet"
-  | "install_script"
   | "enable_autosync"
-  | "backfill"
   | "activate";
 
 export type StudioProductPlan = {
@@ -86,14 +85,14 @@ function buildTaskList(plan: {
   needsGmail: boolean;
 }): StudioTaskId[] {
   const tasks: StudioTaskId[] = ["plan"];
+  // Access first → collect data → create sheet → user enables autosync → activate
   if (plan.needsGmail || plan.needsSheet) tasks.push("permissions");
   if (plan.needsSheet) {
     tasks.push(
       "create_table",
+      "collect_data",
       "create_sheet",
-      "install_script",
-      "enable_autosync",
-      "backfill"
+      "enable_autosync"
     );
   }
   tasks.push("activate");

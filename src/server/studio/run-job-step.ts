@@ -5,8 +5,11 @@ import { generateWorkflowFromPrompt } from "@/server/agent";
 import { getGoogleAuthClientForOrganization } from "@/server/google/auth-client";
 import { ensureSheetsOAuthClient } from "@/server/google/ensure-sheets-auth";
 import { getGmailTokenHealth } from "@/server/google/gmail-token-health";
+import { collectStarredMailToTable } from "@/server/google-sheets/collect-starred-mail-to-table";
 import { provisionGoogleSheetExport } from "@/server/google-sheets/provision-sheet";
+import { pushSheetExportDataFromServer } from "@/server/google-sheets/push-sheet-export-data";
 import { installSheetExportTrigger } from "@/server/google-sheets/install-sheet-export-trigger";
+import { syncStarredMailToSheet } from "@/server/google-sheets/sync-starred-mail-to-sheet";
 import { automationRepository } from "@/server/repositories/automation.repository";
 import { extractionTableRepository } from "@/server/repositories/extraction-table.repository";
 import { gmailRepository } from "@/server/repositories/gmail.repository";
@@ -98,13 +101,15 @@ async function ensureWorkflowGraph(job: StudioJob): Promise<WorkflowGraph> {
 }
 
 /**
- * Advance exactly one studio task so the UI can animate progress.
- * Call repeatedly until status is ready / needs_permission / failed.
+ * Advance exactly one studio task.
+ * Flow: access → collect data → create sheet → wait for user autosync click → activate.
  */
 export async function continueStudioJob(params: {
   jobId: string;
   organizationId: string;
   requestOrigin: string;
+  /** User clicked "Enable auto-sync" in the UI. */
+  enableAutosync?: boolean;
 }): Promise<ReturnType<typeof publicStudioJob>> {
   const job = await getStudioJob(params.jobId);
   if (!job || job.organizationId !== params.organizationId) {
@@ -114,7 +119,11 @@ export async function continueStudioJob(params: {
     return publicStudioJob(job);
   }
 
-  // Unblock any previously blocked task when the user resumes.
+  if (params.enableAutosync) {
+    job.autosyncConfirmed = true;
+  }
+
+  // Unblock previously blocked tasks when the user resumes.
   job.tasks = job.tasks.map((t) =>
     t.status === "blocked" ? { ...t, status: "pending", detail: undefined } : t
   );
@@ -125,25 +134,11 @@ export async function continueStudioJob(params: {
   job.permission = undefined;
   job.error = undefined;
 
-  // Skip already-done tasks
   while (job.cursor < job.tasks.length && job.tasks[job.cursor]?.status === "done") {
     job.cursor += 1;
   }
 
   if (job.cursor >= job.tasks.length) {
-    if (job.plan.needsSheet && !job.autoSyncOn) {
-      job.status = "needs_permission";
-      job.permission = {
-        integration: "GMAIL",
-        reconnectUrl: buildGmailReconnectUrl(params.requestOrigin, {
-          popup: true,
-          sheetExportId: job.exportId,
-        }),
-        message: "Finish Google approval to enable the auto-sync timer.",
-      };
-      await saveStudioJob(job);
-      return publicStudioJob(job);
-    }
     job.status = "ready";
     await saveStudioJob(job);
     return publicStudioJob(job);
@@ -178,7 +173,7 @@ export async function continueStudioJob(params: {
             popup: true,
           }),
           message:
-            "Connect Google and allow Gmail + Sheets + Apps Script so we can finish your product.",
+            "Connect Google with full access (Gmail + Sheets) so we can collect your data and create the sheet.",
         };
         await saveStudioJob(job);
         return publicStudioJob(job);
@@ -193,7 +188,7 @@ export async function continueStudioJob(params: {
           gmailHistoryId: null,
         });
       }
-      markTask(job, task.id, "done", "Google connected");
+      markTask(job, task.id, "done", "Google connected — full access ready");
     } else if (task.id === "create_table") {
       const created = await extractionTableRepository.create({
         organizationId: job.organizationId,
@@ -207,6 +202,23 @@ export async function continueStudioJob(params: {
         task.id,
         "done",
         `Headings: ${job.plan.columns.map((c) => c.label).join(", ")}`
+      );
+    } else if (task.id === "collect_data") {
+      if (!job.tableId) throw new Error("Table missing before data collect");
+      const collected = await collectStarredMailToTable({
+        organizationId: job.organizationId,
+        tableId: job.tableId,
+        starredOnly: job.plan.starredOnly,
+      });
+      markTask(
+        job,
+        task.id,
+        "done",
+        collected.extracted > 0
+          ? `Collected ${collected.extracted} rows from ${collected.messagesFetched} starred emails`
+          : collected.messagesFetched > 0
+            ? `Fetched ${collected.messagesFetched} starred emails — extraction wrote 0 rows (check AI keys / rate limits)`
+            : "No starred Gmail found yet — you can star emails and sync later"
       );
     } else if (task.id === "create_sheet") {
       if (!job.tableId || !job.tableName) {
@@ -236,94 +248,88 @@ export async function continueStudioJob(params: {
       job.exportId = created.id;
       job.spreadsheetUrl = created.spreadsheetUrl;
       job.appsScriptId = provisioned.appsScriptId || undefined;
-      markTask(
-        job,
-        task.id,
-        "done",
-        provisioned.spreadsheetUrl || "Sheet created"
-      );
-    } else if (task.id === "install_script") {
-      if (!job.exportId) throw new Error("Sheet export missing");
-      const { account } = await getGoogleAuthClientForOrganization(
-        job.organizationId
-      );
-      const auth = await ensureSheetsOAuthClient(account);
-      const installed = await installSheetExportTrigger({
-        auth,
-        organizationId: job.organizationId,
-        exportId: job.exportId,
-        requestOrigin: params.requestOrigin,
-        repairOnly: false,
-        triggerMinutes: job.plan.syncMinutes,
-      });
-      job.appsScriptId = installed.appsScriptId;
-      if (installed.triggerInstalled) {
-        job.autoSyncOn = true;
+
+      // Push already-collected rows into the new sheet
+      let rowCount = 0;
+      try {
+        const pushed = await pushSheetExportDataFromServer({
+          organizationId: job.organizationId,
+          exportId: created.id,
+          skipPrepare: true,
+        });
+        rowCount = pushed.rowCount;
+      } catch (err) {
+        console.warn(
+          "[studio] initial sheet push:",
+          err instanceof Error ? err.message : err
+        );
       }
+
       markTask(
         job,
         task.id,
         "done",
-        "Standalone script installed (starred Gmail → Gemini → sheet)"
+        rowCount > 0
+          ? `${provisioned.spreadsheetUrl || "Sheet created"} · ${rowCount} rows written`
+          : provisioned.spreadsheetUrl || "Sheet created"
       );
     } else if (task.id === "enable_autosync") {
       if (!job.exportId) throw new Error("Sheet export missing");
+
+      // Wait for an explicit user click — do not auto-enable.
+      if (!job.autosyncConfirmed) {
+        markTask(
+          job,
+          task.id,
+          "blocked",
+          "Click Enable auto-sync below to turn on recurring updates"
+        );
+        job.status = "awaiting_autosync";
+        await saveStudioJob(job);
+        return publicStudioJob(job);
+      }
+
       if (job.autoSyncOn) {
         markTask(
           job,
           task.id,
           "done",
-          `Auto-fetch on — every ${job.plan.syncMinutes} min`
+          `Auto-sync on — every ${job.plan.syncMinutes} min`
         );
       } else {
-        const { account } = await getGoogleAuthClientForOrganization(
-          job.organizationId
-        );
-        const auth = await ensureSheetsOAuthClient(account);
-        const installed = await installSheetExportTrigger({
-          auth,
-          organizationId: job.organizationId,
-          exportId: job.exportId,
-          requestOrigin: params.requestOrigin,
-          repairOnly: true,
-          triggerMinutes: job.plan.syncMinutes,
-        });
-        if (installed.triggerInstalled) {
-          job.autoSyncOn = true;
-          markTask(
-            job,
-            task.id,
-            "done",
-            `Apps Script timer on — every ${job.plan.syncMinutes} min`
+        // Try Apps Script timer; fall back to InboxFlow server keepalive.
+        try {
+          const { account } = await getGoogleAuthClientForOrganization(
+            job.organizationId
           );
-        } else if (installed.reason === "authorization") {
-          // OAuth can fix missing script scopes — ask once.
-          markTask(
-            job,
-            task.id,
-            "blocked",
-            installed.message || "Google approval needed for timer"
-          );
-          job.status = "needs_permission";
-          job.permission = {
-            integration: "GMAIL",
-            reconnectUrl: buildGmailReconnectUrl(params.requestOrigin, {
-              popup: true,
-              sheetExportId: job.exportId,
-            }),
-            message:
-              "One Google approval turns on auto-fetch. No sheet menu needed.",
-          };
-          await saveStudioJob(job);
-          return publicStudioJob(job);
-        } else {
-          // gcp_project (and other) cannot be fixed by OAuth alone —
-          // Google requires a manual Apps Script ↔ GCP link that has no API.
-          // Fall back to InboxFlow server sync so the product still goes live.
-          try {
-            const { syncStarredMailToSheet } = await import(
-              "@/server/google-sheets/sync-starred-mail-to-sheet"
+          const auth = await ensureSheetsOAuthClient(account);
+          const installed = await installSheetExportTrigger({
+            auth,
+            organizationId: job.organizationId,
+            exportId: job.exportId,
+            requestOrigin: params.requestOrigin,
+            repairOnly: false,
+            triggerMinutes: job.plan.syncMinutes,
+          });
+          job.appsScriptId = installed.appsScriptId;
+          if (installed.triggerInstalled) {
+            job.autoSyncOn = true;
+            markTask(
+              job,
+              task.id,
+              "done",
+              `Auto-sync on (sheet timer) — every ${job.plan.syncMinutes} min`
             );
+          }
+        } catch (err) {
+          console.warn(
+            "[studio] autosync install:",
+            err instanceof Error ? err.message : err
+          );
+        }
+
+        if (!job.autoSyncOn) {
+          try {
             const synced = await syncStarredMailToSheet({
               organizationId: job.organizationId,
               exportId: job.exportId,
@@ -334,56 +340,18 @@ export async function continueStudioJob(params: {
               job,
               task.id,
               "done",
-              `Auto-fetch every ${job.plan.syncMinutes} min via InboxFlow · ${synced.rowCount} rows (${synced.messagesFetched} starred fetched)`
+              `Auto-sync on via InboxFlow — every ${job.plan.syncMinutes} min · ${synced.rowCount} rows`
             );
           } catch (err) {
-            console.warn(
-              "[studio] server sheet sync fallback:",
-              err instanceof Error ? err.message : err
-            );
             job.autoSyncOn = true;
             markTask(
               job,
               task.id,
               "done",
-              `Auto-fetch every ${job.plan.syncMinutes} min via InboxFlow (initial sync deferred: ${err instanceof Error ? err.message : "error"})`
+              `Auto-sync on via InboxFlow — every ${job.plan.syncMinutes} min (${err instanceof Error ? err.message : "sync deferred"})`
             );
           }
         }
-      }
-    } else if (task.id === "backfill") {
-      if (!job.exportId) throw new Error("Sheet export missing");
-      try {
-        const { syncStarredMailToSheet } = await import(
-          "@/server/google-sheets/sync-starred-mail-to-sheet"
-        );
-        const synced = await syncStarredMailToSheet({
-          organizationId: job.organizationId,
-          exportId: job.exportId,
-          starredOnly: job.plan.starredOnly,
-        });
-        markTask(
-          job,
-          task.id,
-          "done",
-          synced.rowCount > 0
-            ? `Imported ${synced.rowCount} rows from ${synced.messagesFetched} starred emails`
-            : synced.messagesFetched > 0
-              ? `Fetched ${synced.messagesFetched} starred emails but extraction wrote 0 rows — check AI keys`
-              : "No starred Gmail found yet — star an email and wait for the next sync"
-        );
-      } catch (err) {
-        markTask(
-          job,
-          task.id,
-          "failed",
-          err instanceof Error ? err.message : "Starred mail import failed"
-        );
-        job.status = "failed";
-        job.error =
-          err instanceof Error ? err.message : "Starred mail import failed";
-        await saveStudioJob(job);
-        return publicStudioJob(job);
       }
     } else if (task.id === "activate") {
       const graph = await ensureWorkflowGraph(job);
@@ -431,19 +399,7 @@ export async function continueStudioJob(params: {
     job.cursor += 1;
 
     if (job.cursor >= job.tasks.length) {
-      if (job.plan.needsSheet && !job.autoSyncOn) {
-        job.status = "needs_permission";
-        job.permission = {
-          integration: "GMAIL",
-          reconnectUrl: buildGmailReconnectUrl(params.requestOrigin, {
-            popup: true,
-            sheetExportId: job.exportId,
-          }),
-          message: "Finish Google approval to enable the auto-sync timer.",
-        };
-      } else {
-        job.status = "ready";
-      }
+      job.status = "ready";
     } else {
       job.status = "running";
     }
