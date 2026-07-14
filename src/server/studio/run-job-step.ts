@@ -2,13 +2,10 @@ import { generateSheetSyncApiKey } from "@/lib/sheet-sync/api-key";
 import { buildGmailReconnectUrl } from "@/lib/gmail/reconnect-url";
 import { hasGoogleSheetsScopes } from "@/lib/gmail/scopes";
 import { generateWorkflowFromPrompt } from "@/server/agent";
-import { getGoogleAuthClientForOrganization } from "@/server/google/auth-client";
-import { ensureSheetsOAuthClient } from "@/server/google/ensure-sheets-auth";
 import { getGmailTokenHealth } from "@/server/google/gmail-token-health";
 import { collectStarredMailToTable } from "@/server/google-sheets/collect-starred-mail-to-table";
 import { provisionGoogleSheetExport } from "@/server/google-sheets/provision-sheet";
 import { pushSheetExportDataFromServer } from "@/server/google-sheets/push-sheet-export-data";
-import { installSheetExportTrigger } from "@/server/google-sheets/install-sheet-export-trigger";
 import { syncStarredMailToSheet } from "@/server/google-sheets/sync-starred-mail-to-sheet";
 import { automationRepository } from "@/server/repositories/automation.repository";
 import { extractionTableRepository } from "@/server/repositories/extraction-table.repository";
@@ -232,6 +229,7 @@ export async function continueStudioJob(params: {
         apiKey: key,
         apiBaseUrl: params.requestOrigin,
         triggerMinutes: job.plan.syncMinutes,
+        websiteAutosyncOnly: true,
       });
       const created = await sheetExportRepository.create({
         organizationId: job.organizationId,
@@ -276,44 +274,53 @@ export async function continueStudioJob(params: {
     } else if (task.id === "enable_autosync") {
       if (!job.exportId) throw new Error("Sheet export missing");
 
-      // Wait for an explicit user click — do not auto-enable.
+      // Wait for an explicit user click on the website.
       if (!job.autosyncConfirmed) {
         markTask(
           job,
           task.id,
           "blocked",
-          "Click Enable auto-sync below to turn on recurring updates"
+          "Click Enable auto-sync — Google permissions open in this app"
         );
         job.status = "awaiting_autosync";
         await saveStudioJob(job);
         return publicStudioJob(job);
       }
 
-      // Website-driven autosync: always turn on InboxFlow server keep-alive
-      // (reliable, uses Groq for AI). Also push the Groq Apps Script + try timer.
-      let scriptTimerOn = false;
-      try {
-        const { account } = await getGoogleAuthClientForOrganization(
-          job.organizationId
+      // Require Google OAuth with Gmail + Sheets (website popup — never sheet menu).
+      const gmailAccount = await gmailRepository.findGmailAccount(
+        job.organizationId
+      );
+      const health = await getGmailTokenHealth(gmailAccount);
+      const googleOk =
+        Boolean(gmailAccount?.status === "ACTIVE") &&
+        !health.needsReconnect &&
+        hasGoogleSheetsScopes(gmailAccount?.scopes);
+
+      if (!googleOk) {
+        markTask(
+          job,
+          task.id,
+          "blocked",
+          "Approve Google access in the popup, then click Enable auto-sync again"
         );
-        const auth = await ensureSheetsOAuthClient(account);
-        const installed = await installSheetExportTrigger({
-          auth,
-          organizationId: job.organizationId,
-          exportId: job.exportId,
-          requestOrigin: params.requestOrigin,
-          repairOnly: false,
-          triggerMinutes: job.plan.syncMinutes,
-        });
-        job.appsScriptId = installed.appsScriptId;
-        scriptTimerOn = Boolean(installed.triggerInstalled);
-      } catch (err) {
-        console.warn(
-          "[studio] sheet script install:",
-          err instanceof Error ? err.message : err
-        );
+        job.status = "needs_permission";
+        job.autosyncConfirmed = false;
+        job.permission = {
+          integration: "GMAIL",
+          reconnectUrl: buildGmailReconnectUrl(params.requestOrigin, {
+            popup: true,
+            sheetExportId: job.exportId,
+          }),
+          message:
+            "Allow Gmail + Google Sheets in the popup. Auto-sync runs from InboxFlow — you do not open the sheet.",
+        };
+        await saveStudioJob(job);
+        return publicStudioJob(job);
       }
 
+      // Website keep-alive path only — Sheets API write, Groq AI extract.
+      // No Apps Script authorization / sheet menu.
       let rowCount = 0;
       try {
         const synced = await syncStarredMailToSheet({
@@ -323,20 +330,27 @@ export async function continueStudioJob(params: {
         });
         rowCount = synced.rowCount;
       } catch (err) {
-        console.warn(
-          "[studio] initial autosync pull:",
-          err instanceof Error ? err.message : err
-        );
+        const msg = err instanceof Error ? err.message : "sync failed";
+        markTask(job, task.id, "failed", msg);
+        job.status = "failed";
+        job.error = msg;
+        await saveStudioJob(job);
+        return publicStudioJob(job);
       }
+
+      await sheetExportRepository.updateSyncInterval(
+        job.exportId,
+        job.organizationId,
+        job.plan.syncMinutes
+      );
+      await sheetExportRepository.touchFetched(job.exportId);
 
       job.autoSyncOn = true;
       markTask(
         job,
         task.id,
         "done",
-        scriptTimerOn
-          ? `Auto-sync on — every ${job.plan.syncMinutes} min (website + sheet timer, Groq AI) · ${rowCount} rows`
-          : `Auto-sync on from InboxFlow website — every ${job.plan.syncMinutes} min (Groq AI) · ${rowCount} rows`
+        `Auto-sync on from InboxFlow — every ${job.plan.syncMinutes} min · ${rowCount} rows (no sheet menu)`
       );
     } else if (task.id === "activate") {
       const graph = await ensureWorkflowGraph(job);

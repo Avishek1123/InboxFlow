@@ -24,9 +24,8 @@ function isInsufficientScopesError(err: unknown): boolean {
 }
 
 /**
- * Creates a Google Spreadsheet, seeds rows, and installs a standalone Apps Script:
- * starred Gmail → Gemini AI → sheet (runs in Google's cloud every N minutes).
- * InboxFlow server is not called by the timer.
+ * Creates a Google Spreadsheet and seeds rows.
+ * Studio uses websiteAutosyncOnly (InboxFlow keep-alive — no sheet menu).
  */
 export async function provisionGoogleSheetExport(params: {
   organizationId: string;
@@ -35,6 +34,8 @@ export async function provisionGoogleSheetExport(params: {
   apiKey: string;
   apiBaseUrl: string;
   triggerMinutes?: number;
+  /** Skip Apps Script — website keep-alive is the sync path. */
+  websiteAutosyncOnly?: boolean;
 }): Promise<{
   spreadsheetId: string;
   spreadsheetUrl: string;
@@ -95,6 +96,17 @@ export async function provisionGoogleSheetExport(params: {
   const triggerMinutes =
     params.triggerMinutes ?? getSyncPipelineConfig().sheetTriggerMinutes;
 
+  if (params.websiteAutosyncOnly) {
+    return {
+      spreadsheetId,
+      spreadsheetUrl,
+      appsScriptId: "",
+      scriptReady: false,
+      needsAutoSyncSetup: false,
+      setupNote: `Sheet ready. Enable auto-sync on the InboxFlow website (every ${triggerMinutes} min) — no sheet menu needed.`,
+    };
+  }
+
   try {
     const scriptConfig = await buildStandaloneAppsScriptConfig({
       organizationId: params.organizationId,
@@ -118,22 +130,19 @@ export async function provisionGoogleSheetExport(params: {
       setupNote:
         finalized.setupNote ??
         (finalized.triggerInstalled
-          ? `Apps Script timer is on (every ${triggerMinutes} min): starred Gmail → Gemini → this sheet. InboxFlow server is not used for the timer.`
-          : `Sheet is ready. Open the sheet → InboxFlow → Enable auto-sync so Google can authorize Gmail + Gemini (every ${triggerMinutes} min).`),
+          ? `Apps Script timer is on (every ${triggerMinutes} min).`
+          : `Sheet ready. Enable auto-sync from the InboxFlow website — no sheet menu needed.`),
     };
   } catch (scriptErr) {
-    const note =
-      scriptErr instanceof Error
-        ? `Sheet is ready. Open the sheet → InboxFlow → Enable auto-sync (${scriptErr.message}).`
-        : "Sheet is ready. Open the sheet → InboxFlow → Enable auto-sync.";
     console.warn("[provisionGoogleSheetExport] Apps Script skipped:", scriptErr);
     return {
       spreadsheetId,
       spreadsheetUrl,
       appsScriptId: "",
       scriptReady: false,
-      needsAutoSyncSetup: true,
-      setupNote: note,
+      needsAutoSyncSetup: false,
+      setupNote:
+        "Sheet ready. Enable auto-sync from the InboxFlow website — no sheet menu needed.",
     };
   }
 }

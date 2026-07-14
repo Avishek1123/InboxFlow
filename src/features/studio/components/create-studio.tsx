@@ -276,21 +276,125 @@ export function CreateStudio() {
     setError(null);
     await refreshIntegrations();
     await sleep(600);
-    await advanceUntilPaused(id);
-  }, [advanceUntilPaused, build, job?.id, refreshIntegrations]);
 
-  const enableAutosync = useCallback(async () => {
+    // If we were enabling autosync, resume that path (website-only, not sheet menu).
+    const waitingAutosync =
+      job?.tasks.some((t) => t.id === "enable_autosync" && t.status !== "done") ??
+      false;
+    if (waitingAutosync) {
+      try {
+        const snap = await postJson<JobSnapshot>(`/api/v1/studio/jobs/${id}`, {
+          enableAutosync: true,
+        });
+        setJob(snap);
+        if (snap.status === "needs_permission") {
+          applyPausedUi(snap);
+          return;
+        }
+        await advanceUntilPaused(id, snap);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Could not enable auto-sync");
+        setPhase("awaiting_autosync");
+      }
+      return;
+    }
+
+    await advanceUntilPaused(id);
+  }, [
+    advanceUntilPaused,
+    applyPausedUi,
+    build,
+    job?.id,
+    job?.tasks,
+    refreshIntegrations,
+  ]);
+
+  /** Open Google OAuth (all scopes) in a popup, then finish website autosync. */
+  const openGoogleThenEnableAutosync = useCallback(async () => {
     const id = jobIdRef.current || job?.id;
     if (!id) return;
+
     setEnablingAutosync(true);
     setError(null);
+
+    const reconnectUrl =
+      job?.permission?.reconnectUrl ||
+      integrationStatus.gmail.reconnectUrl ||
+      "/api/v1/integrations/gmail/connect?reconnect=1";
+
+    const authorized = await new Promise<boolean>((resolve) => {
+      const w = 520;
+      const h = 720;
+      const left = window.screenX + (window.outerWidth - w) / 2;
+      const top = window.screenY + (window.outerHeight - h) / 2;
+      const url = new URL(reconnectUrl, window.location.origin);
+      url.searchParams.set("popup", "1");
+      url.searchParams.set("openerOrigin", window.location.origin);
+      if (job?.sheet?.id) {
+        url.searchParams.set("sheetExportId", job.sheet.id);
+      }
+      const popup = window.open(
+        url.toString(),
+        "inboxflow-google-autosync",
+        `width=${w},height=${h},left=${left},top=${top}`
+      );
+
+      let settled = false;
+      const done = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener("message", onMessage);
+        window.clearInterval(poll);
+        resolve(ok);
+      };
+
+      function onMessage(event: MessageEvent) {
+        const data = event.data as {
+          type?: string;
+          ok?: boolean;
+        };
+        if (data?.type !== "inboxflow-gmail-oauth") return;
+        done(Boolean(data.ok));
+      }
+      window.addEventListener("message", onMessage);
+
+      const poll = window.setInterval(() => {
+        if (popup && popup.closed) {
+          // Popup closed — try continuing; API will re-check scopes.
+          done(true);
+        }
+      }, 500);
+
+      // Safety timeout
+      window.setTimeout(() => done(true), 120_000);
+    });
+
+    if (!authorized) {
+      setEnablingAutosync(false);
+      setError("Google authorization was cancelled. Try Enable auto-sync again.");
+      setPhase("awaiting_autosync");
+      return;
+    }
+
+    await refreshIntegrations();
+    await sleep(700);
     setPhase("building");
+
     try {
       const snap = await postJson<JobSnapshot>(`/api/v1/studio/jobs/${id}`, {
         enableAutosync: true,
       });
       setJob(snap);
       jobIdRef.current = snap.id;
+
+      if (snap.status === "needs_permission") {
+        applyPausedUi(snap);
+        setError(
+          snap.permission?.message ||
+            "Approve every Google permission checkbox, then click Enable auto-sync again."
+        );
+        return;
+      }
       if (snap.status === "running") {
         await advanceUntilPaused(id, snap);
       } else if (snap.status === "ready") {
@@ -309,7 +413,15 @@ export function CreateStudio() {
     } finally {
       setEnablingAutosync(false);
     }
-  }, [advanceUntilPaused, job?.id]);
+  }, [
+    advanceUntilPaused,
+    applyPausedUi,
+    integrationStatus.gmail.reconnectUrl,
+    job?.id,
+    job?.permission?.reconnectUrl,
+    job?.sheet?.id,
+    refreshIntegrations,
+  ]);
 
   async function runTest() {
     if (!job?.automation?.id) return;
@@ -370,8 +482,9 @@ export function CreateStudio() {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Ask AI</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Connect Google → we collect your data and create the sheet → you click
-          Enable auto-sync when you&apos;re ready.
+          We create your sheet with data, then Enable auto-sync asks Google for
+          permission in this app — syncing runs every minute with no sheet
+          steps.
         </p>
       </header>
 
@@ -472,13 +585,14 @@ export function CreateStudio() {
               <div className="mt-4 space-y-3 rounded-xl border border-emerald-500/35 bg-emerald-500/5 p-4">
                 <div>
                   <p className="text-sm font-semibold text-emerald-800 dark:text-emerald-200">
-                    Sheet is ready — turn on auto-sync
+                    Sheet is ready — enable auto-sync here
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Data is in your sheet. Click below to enable auto-fetch from
-                    this website every {job.plan.syncMinutes} minute
-                    {job.plan.syncMinutes === 1 ? "" : "s"} (Groq AI — no need
-                    to open the sheet menu).
+                    Click below. A Google popup asks for Gmail + Sheets access.
+                    After you approve, InboxFlow syncs starred mail into your
+                    sheet every {job.plan.syncMinutes} minute
+                    {job.plan.syncMinutes === 1 ? "" : "s"}. You never need the
+                    sheet menu.
                   </p>
                 </div>
                 {job.sheet?.spreadsheetUrl && (
@@ -494,11 +608,11 @@ export function CreateStudio() {
                 <button
                   type="button"
                   disabled={enablingAutosync}
-                  onClick={() => void enableAutosync()}
+                  onClick={() => void openGoogleThenEnableAutosync()}
                   className="w-full rounded-xl bg-emerald-600 py-3 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
                 >
                   {enablingAutosync
-                    ? "Enabling auto-sync…"
+                    ? "Authorizing & enabling…"
                     : "Enable auto-sync"}
                 </button>
               </div>
@@ -542,6 +656,11 @@ export function CreateStudio() {
               >
                 {job.sheet.spreadsheetUrl}
               </a>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Auto-sync runs from InboxFlow every{" "}
+                {job.sheet.syncMinutes ?? job.plan.syncMinutes} min (Groq AI). Keep
+                the app running — no Google Sheet menu steps.
+              </p>
             </div>
           )}
 
