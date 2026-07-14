@@ -1,7 +1,8 @@
 import { apiError, apiSuccess } from "@/lib/api-response";
 import { isGmailOAuthReconnectMessage } from "@/lib/gmail/google-oauth-errors";
 import { GMAIL_RECONNECT_FOR_SHEETS_MESSAGE } from "@/lib/gmail/scopes";
-import { syncSheetExportFull } from "@/server/google-sheets/sync-sheet-export-full";
+import { syncStarredMailToSheet } from "@/server/google-sheets/sync-starred-mail-to-sheet";
+import { ensureSheetKeepAliveWorker } from "@/server/google-sheets/sheet-keepalive";
 import { requireOrganization } from "@/server/organizations/require-organization";
 import { prisma } from "@/server/db";
 
@@ -10,9 +11,10 @@ export const maxDuration = 120;
 
 type Params = { params: Promise<{ id: string }> };
 
-/** Push latest dashboard rows into the linked Google Sheet (no Apps Script needed). */
+/** Pull starred Gmail → AI extract → write Google Sheet (website path, no Apps Script). */
 export async function POST(_request: Request, { params }: Params) {
   try {
+    ensureSheetKeepAliveWorker();
     const { organization } = await requireOrganization();
     const { id } = await params;
 
@@ -23,12 +25,23 @@ export async function POST(_request: Request, { params }: Params) {
       return apiError("NOT_FOUND", "Sheet export not found", 404);
     }
 
-    const result = await syncSheetExportFull({
+    const result = await syncStarredMailToSheet({
       organizationId: organization.id,
       exportId: id,
+      starredOnly: true,
     });
 
-    return apiSuccess(result);
+    return apiSuccess({
+      rowCount: result.rowCount,
+      gmailSynced: true,
+      messagesFetched: result.messagesFetched,
+      extraction: {
+        processed: result.extracted,
+        succeeded: result.extracted,
+        failed: 0,
+        rounds: 1,
+      },
+    });
   } catch (err) {
     console.error("[sheet-exports sync]", err);
     const message = err instanceof Error ? err.message : "Sync failed";

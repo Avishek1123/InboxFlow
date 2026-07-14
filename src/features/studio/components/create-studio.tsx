@@ -7,6 +7,7 @@ import { StudioTaskProgress } from "@/features/studio/components/studio-task-pro
 import { useIntegrationStatus } from "@/features/automations/hooks/use-integration-status";
 import type { IntegrationRequirement } from "@/lib/automation/definitions";
 import { automationClient } from "@/services/automation-client";
+import { sheetExportClient } from "@/services/sheet-export-client";
 import {
   parseSheetSyncMinutesFromPrompt,
   promptRequestsSheetAutoUpdate,
@@ -130,6 +131,8 @@ export function CreateStudio() {
   const [testStatus, setTestStatus] = useState<string | null>(null);
   const [testError, setTestError] = useState<string | null>(null);
   const [enablingAutosync, setEnablingAutosync] = useState(false);
+  const [sheetSyncBusy, setSheetSyncBusy] = useState(false);
+  const [sheetSyncNote, setSheetSyncNote] = useState<string | null>(null);
 
   const jobIdRef = useRef<string | null>(null);
   const advancingRef = useRef(false);
@@ -423,6 +426,71 @@ export function CreateStudio() {
     refreshIntegrations,
   ]);
 
+  const syncSheetNow = useCallback(async () => {
+    const exportId = job?.sheet?.id;
+    if (!exportId) return;
+    setSheetSyncBusy(true);
+    setSheetSyncNote("Syncing starred Gmail → sheet…");
+    try {
+      const result = await sheetExportClient.sync(exportId);
+      setSheetSyncNote(
+        `Synced ${result.rowCount} rows · fetched ${result.messagesFetched} messages · extracted ${result.extraction.succeeded}`
+      );
+    } catch (e) {
+      setSheetSyncNote(
+        e instanceof Error ? e.message : "Sheet sync failed"
+      );
+    } finally {
+      setSheetSyncBusy(false);
+    }
+  }, [job?.sheet?.id]);
+
+  // While product is ready, keep syncing from the browser so local/dev works
+  // even if server keep-alive/cron is not running.
+  useEffect(() => {
+    if (job?.status !== "ready" || !job.sheet?.id || !job.sheet.autoSyncOn) {
+      return;
+    }
+    const exportId = job.sheet.id;
+    const minutes = Math.max(1, job.sheet.syncMinutes ?? job.plan.syncMinutes);
+    const intervalMs = minutes * 60_000;
+
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled || document.hidden) return;
+      try {
+        const result = await sheetExportClient.sync(exportId);
+        if (!cancelled) {
+          setSheetSyncNote(
+            `Auto-sync OK · ${result.rowCount} rows · ${new Date().toLocaleTimeString()}`
+          );
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setSheetSyncNote(
+            e instanceof Error
+              ? `Auto-sync error: ${e.message}`
+              : "Auto-sync error"
+          );
+        }
+      }
+    };
+
+    // Immediate sync after ready, then every interval
+    void tick();
+    const id = window.setInterval(() => void tick(), intervalMs);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [
+    job?.status,
+    job?.sheet?.id,
+    job?.sheet?.autoSyncOn,
+    job?.sheet?.syncMinutes,
+    job?.plan.syncMinutes,
+  ]);
+
   async function runTest() {
     if (!job?.automation?.id) return;
     setPhase("testing");
@@ -657,14 +725,29 @@ export function CreateStudio() {
                 {job.sheet.spreadsheetUrl}
               </a>
               <p className="mt-2 text-[11px] text-muted-foreground">
-                Auto-sync runs from InboxFlow every{" "}
-                {job.sheet.syncMinutes ?? job.plan.syncMinutes} min (Groq AI). Keep
-                the app running — no Google Sheet menu steps.
+                Auto-sync pulls starred Gmail → Groq → this sheet every{" "}
+                {job.sheet.syncMinutes ?? job.plan.syncMinutes} min. Keep this
+                page/server open. No Google Sheet menu.
               </p>
+              {sheetSyncNote && (
+                <p className="mt-2 text-xs text-emerald-800 dark:text-emerald-200">
+                  {sheetSyncNote}
+                </p>
+              )}
             </div>
           )}
 
           <div className="flex flex-wrap gap-2">
+            {job.sheet?.id && (
+              <button
+                type="button"
+                disabled={sheetSyncBusy}
+                onClick={() => void syncSheetNow()}
+                className="rounded-xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-50"
+              >
+                {sheetSyncBusy ? "Syncing…" : "Sync now"}
+              </button>
+            )}
             <button
               type="button"
               disabled={phase === "testing"}

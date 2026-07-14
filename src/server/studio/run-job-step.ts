@@ -321,7 +321,18 @@ export async function continueStudioJob(params: {
 
       // Website keep-alive path only — Sheets API write, Groq AI extract.
       // No Apps Script authorization / sheet menu.
+      try {
+        const { ensureSheetKeepAliveWorker } = await import(
+          "@/server/google-sheets/sheet-keepalive"
+        );
+        ensureSheetKeepAliveWorker();
+      } catch {
+        /* ignore */
+      }
+
       let rowCount = 0;
+      let messagesFetched = 0;
+      let extracted = 0;
       try {
         const synced = await syncStarredMailToSheet({
           organizationId: job.organizationId,
@@ -329,6 +340,8 @@ export async function continueStudioJob(params: {
           starredOnly: job.plan.starredOnly,
         });
         rowCount = synced.rowCount;
+        messagesFetched = synced.messagesFetched;
+        extracted = synced.extracted;
       } catch (err) {
         const msg = err instanceof Error ? err.message : "sync failed";
         markTask(job, task.id, "failed", msg);
@@ -343,14 +356,17 @@ export async function continueStudioJob(params: {
         job.organizationId,
         job.plan.syncMinutes
       );
-      await sheetExportRepository.touchFetched(job.exportId);
 
       job.autoSyncOn = true;
       markTask(
         job,
         task.id,
         "done",
-        `Auto-sync on from InboxFlow — every ${job.plan.syncMinutes} min · ${rowCount} rows (no sheet menu)`
+        rowCount > 0
+          ? `Auto-sync on — every ${job.plan.syncMinutes} min · ${rowCount} rows in sheet`
+          : messagesFetched > 0
+            ? `Auto-sync on — fetched ${messagesFetched} mails but extracted ${extracted} rows (check Groq limits). Use Sync now.`
+            : `Auto-sync on — every ${job.plan.syncMinutes} min. No starred mail yet — star an email then Sync now.`
       );
     } else if (task.id === "activate") {
       const graph = await ensureWorkflowGraph(job);

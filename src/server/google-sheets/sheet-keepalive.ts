@@ -17,7 +17,7 @@ export function startSheetKeepAliveWorker() {
   const tickMs = Number(process.env.SHEET_KEEPALIVE_TICK_MS ?? 60_000);
 
   console.info(
-    `[sheet-keepalive] Started (tick every ${Math.round(tickMs / 1000)}s). New starred mail will be pushed to linked sheets automatically.`
+    `[sheet-keepalive] Started (tick every ${Math.round(tickMs / 1000)}s). Website-driven starred-mail → sheet sync.`
   );
 
   const run = () => {
@@ -26,9 +26,14 @@ export function startSheetKeepAliveWorker() {
     );
   };
 
-  // First tick shortly after boot so users see updates without waiting a full minute.
-  setTimeout(run, 15_000);
+  // Immediate + recurring. Also used as a local fallback when Vercel cron is unavailable.
+  setTimeout(run, 3_000);
   setInterval(run, tickMs);
+}
+
+/** Safe to call from API routes — starts the worker if instrumentation missed it. */
+export function ensureSheetKeepAliveWorker() {
+  startSheetKeepAliveWorker();
 }
 
 async function tickDueSheetExports() {
