@@ -474,37 +474,6 @@ export function CreateStudio() {
     }
   }, [job?.sheet?.id]);
 
-  useEffect(() => {
-    if (job?.status !== "ready" || !job.sheet?.id || !job.sheet.autoSyncOn) {
-      return;
-    }
-    const exportId = job.sheet.id;
-    const minutes = 1;
-    const intervalMs = minutes * 60_000;
-
-    let cancelled = false;
-    const tick = async () => {
-      if (cancelled || document.hidden) return;
-      try {
-        const result = await sheetExportClient.sync(exportId);
-        if (!cancelled) {
-          setSheetSyncNote(
-            `Backup sync OK · ${result.rowCount} rows · ${new Date().toLocaleTimeString()}`
-          );
-        }
-      } catch {
-        /* Apps Script owns the live path */
-      }
-    };
-
-    void tick();
-    const id = window.setInterval(() => void tick(), intervalMs);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [job?.status, job?.sheet?.id, job?.sheet?.autoSyncOn]);
-
   async function runTest() {
     if (!job?.automation?.id) return;
     setPhase("testing");

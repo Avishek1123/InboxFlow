@@ -35,15 +35,6 @@ export async function POST(request: Request) {
       plan,
     });
 
-    try {
-      const { ensureSheetKeepAliveWorker } = await import(
-        "@/server/google-sheets/sheet-keepalive"
-      );
-      ensureSheetKeepAliveWorker();
-    } catch {
-      /* ignore */
-    }
-
     const requestOrigin = new URL(request.url).origin;
     const progressed = await continueStudioJob({
       jobId: job.id,

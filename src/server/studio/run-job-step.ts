@@ -387,15 +387,6 @@ export async function continueStudioJob(params: {
         );
       }
 
-      try {
-        const { ensureSheetKeepAliveWorker } = await import(
-          "@/server/google-sheets/sheet-keepalive"
-        );
-        ensureSheetKeepAliveWorker();
-      } catch {
-        /* optional backup */
-      }
-
       job.autoSyncOn = true;
       job.permission = undefined;
       markTask(
