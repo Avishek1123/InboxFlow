@@ -14,7 +14,7 @@ export const runtime = "nodejs";
 
 type Params = { params: Promise<{ id: string }> };
 
-/** Re-push standalone Apps Script with current columns + Gemini key. */
+/** Re-push the standalone sheet script with current columns + Groq key. */
 export async function POST(_request: Request, { params }: Params) {
   try {
     const { organization } = await requireOrganization();
@@ -55,7 +55,7 @@ export async function POST(_request: Request, { params }: Params) {
     return apiSuccess({
       apiKeyPrefix: row.apiKeyPrefix,
       message:
-        "Standalone script updated (Gmail → Gemini → sheet). Use InboxFlow → Sync now in the sheet to test.",
+        "Standalone script updated (starred Gmail → Groq → sheet).",
     });
   } catch (err) {
     console.error("[sheet-exports regenerate-key]", err);

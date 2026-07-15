@@ -5,12 +5,19 @@ import {
 } from "@/lib/sheet-sync/gmail-filter";
 import { extractionTableRepository } from "@/server/repositories/extraction-table.repository";
 import { filterRowsForSheetSync } from "@/server/sheet-sync/filter-payload-rows";
+import { prisma } from "@/server/db";
+
+/**
+ * Layout MUST match the Apps Script sheet layout (headerRow_ in apps-script.ts):
+ * Message ID | <table columns> | From | Subject | Received
+ * Both writers share one format so headers never fight.
+ */
+const ID_COLUMN = { key: "_messageId", label: "Message ID" } as const;
 
 const META_COLUMNS = [
   { key: "_sourceFrom", label: "From" },
   { key: "_sourceSubject", label: "Subject" },
-  { key: "_sourceSnippet", label: "Snippet" },
-  { key: "_extractedAt", label: "Extracted" },
+  { key: "_receivedAt", label: "Received" },
 ] as const;
 
 export type SheetSyncPayload = {
@@ -37,25 +44,43 @@ export async function buildSheetSyncPayload(
   const dataRows = await filterRowsForSheetSync(allRows, organizationId, gmailFilter);
   const columns: ExtractionColumn[] = table.columns;
   const headerKeys = [
+    ID_COLUMN.key,
     ...columns.map((c) => c.key),
     ...META_COLUMNS.map((m) => m.key),
   ];
   const headers = [
+    ID_COLUMN.label,
     ...columns.map((c) => c.label),
     ...META_COLUMNS.map((m) => m.label),
   ];
 
+  // Gmail message ids in extraction rows are internal DB ids; the sheet needs
+  // the Gmail external id so the Apps Script dedupes against the same value.
+  const messageIds = dataRows
+    .map((r) => r.messageId)
+    .filter((id): id is string => Boolean(id));
+  const messages = messageIds.length
+    ? await prisma.message.findMany({
+        where: { organizationId, id: { in: messageIds } },
+        select: { id: true, externalId: true, receivedAt: true },
+      })
+    : [];
+  const messageById = new Map(messages.map((m) => [m.id, m]));
+
   const rows = dataRows.map((row) => {
+    const msg = row.messageId ? messageById.get(row.messageId) : undefined;
     const out: Record<string, string> = {};
     for (const col of columns) {
       const v = row.values[col.key];
       out[col.key] =
         v === null || v === undefined ? "" : String(v);
     }
+    out._messageId = msg?.externalId ?? row.messageId ?? "";
     out._sourceFrom = row.sourceFrom ?? "";
     out._sourceSubject = row.sourceSubject ?? "";
-    out._sourceSnippet = row.sourceSnippet ?? "";
-    out._extractedAt = row.createdAt;
+    out._receivedAt = msg?.receivedAt
+      ? msg.receivedAt.toISOString()
+      : row.createdAt;
     return out;
   });
 
@@ -66,11 +91,8 @@ export async function buildSheetSyncPayload(
     headerKeys,
     rows: rows.map((row) => {
       const byLabel: Record<string, string> = {};
-      columns.forEach((col, i) => {
-        byLabel[headers[i]!] = row[col.key] ?? "";
-      });
-      META_COLUMNS.forEach((meta, j) => {
-        byLabel[headers[columns.length + j]!] = row[meta.key] ?? "";
+      headerKeys.forEach((key, i) => {
+        byLabel[headers[i]!] = row[key] ?? "";
       });
       return byLabel;
     }),

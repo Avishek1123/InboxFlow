@@ -19,7 +19,7 @@ const repushSchema = z.object({
   triggerMinutes: z.number().int().min(1).max(60).optional(),
 });
 
-/** Upload standalone Apps Script (Gmail → Gemini → sheet). No InboxFlow API URL needed. */
+/** Re-upload the standalone sheet script (starred Gmail → Groq → sheet). */
 export async function POST(request: Request, { params }: Params) {
   try {
     const { organization } = await requireOrganization();
@@ -70,8 +70,8 @@ export async function POST(request: Request, { params }: Params) {
       scriptUpdated: true,
       rowCount: 0,
       message:
-        `Standalone script updated (starred Gmail → Gemini → sheet, every ${triggerMinutes} min). ` +
-        `In the sheet: InboxFlow → Enable auto-sync, then Sync now.`,
+        `Sheet script updated (starred Gmail → Groq → sheet, every ${triggerMinutes} min). ` +
+        `Re-enable auto-sync from InboxFlow if the timer is off.`,
     });
   } catch (err) {
     console.error("[sheet-exports repush-script]", err);

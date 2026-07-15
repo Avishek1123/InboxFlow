@@ -152,7 +152,7 @@ export async function installSheetExportTrigger(params: {
       reason: "ok",
       message:
         `Auto-sync is on (${setup.triggerCount} timer, every ${sheetTriggerMinutes} min). ` +
-        `Starred Gmail → Groq AI → this sheet (runs in Google Apps Script).`,
+        `Starred Gmail → AI → this sheet (Apps Script pulls from InboxFlow).`,
     };
   }
 
@@ -168,7 +168,7 @@ export async function installSheetExportTrigger(params: {
       reason: "ok",
       message:
         `Auto-sync is on (${meta.triggerCount} timer, every ${sheetTriggerMinutes} min). ` +
-        `Starred Gmail → Groq AI → this sheet (runs in Google Apps Script).`,
+        `Starred Gmail → AI → this sheet (Apps Script pulls from InboxFlow).`,
     };
   }
 

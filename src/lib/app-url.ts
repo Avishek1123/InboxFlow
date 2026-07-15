@@ -35,6 +35,11 @@ export function getPublicAppBaseUrl(fallbackOrigin?: string): string {
     return fromEnv;
   }
 
+  // A public request origin (e.g. the Vercel deployment) beats a localhost
+  // NEXT_PUBLIC_APP_URL left over from dev — Google must be able to reach it.
+  if (fallbackOrigin && !isLocalAppUrl(fallbackOrigin)) {
+    return fallbackOrigin.replace(/\/$/, "");
+  }
   if (fromEnv && isLocalAppUrl(fromEnv)) return fromEnv;
   if (fallbackOrigin) return fallbackOrigin.replace(/\/$/, "");
   return "http://localhost:3000";

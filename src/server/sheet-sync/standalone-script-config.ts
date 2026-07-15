@@ -1,16 +1,34 @@
 import { prisma } from "@/server/db";
 import type { AppsScriptColumn, AppsScriptConfig } from "@/lib/sheet-sync/apps-script";
-import {
-  buildAppsScriptConfig,
-  resolveAppsScriptGroqKey,
-  resolveAppsScriptGroqModel,
-} from "@/server/sheet-sync/build-apps-script-config";
 
 type StoredColumn = {
   key?: string;
   label?: string;
   hint?: string;
 };
+
+/** Resolve Groq key for embedding into Apps Script at install time. */
+export function resolveAppsScriptGroqKey(): string {
+  const key =
+    process.env.APPS_SCRIPT_GROQ_API_KEY?.trim() ||
+    process.env.GROQ_API_KEY_2?.trim() ||
+    process.env.GROQ_API_KEY?.trim() ||
+    "";
+  if (!key) {
+    throw new Error(
+      "Set GROQ_API_KEY / GROQ_API_KEY_2 (or APPS_SCRIPT_GROQ_API_KEY) so the sheet script can structure emails with AI."
+    );
+  }
+  return key;
+}
+
+export function resolveAppsScriptGroqModel(): string {
+  return (
+    process.env.APPS_SCRIPT_GROQ_MODEL?.trim() ||
+    process.env.GROQ_MODEL?.trim() ||
+    "llama-3.1-8b-instant"
+  );
+}
 
 export async function loadAppsScriptColumnsForTable(
   tableId: string,
@@ -38,7 +56,7 @@ export async function loadAppsScriptColumnsForTable(
   return columns;
 }
 
-/** Standalone Gmail → Groq → sheet script config (no InboxFlow server). */
+/** Standalone Gmail → Groq → sheet script config (no InboxFlow server calls). */
 export async function buildStandaloneAppsScriptConfig(params: {
   organizationId: string;
   tableId: string;
@@ -49,13 +67,12 @@ export async function buildStandaloneAppsScriptConfig(params: {
     params.tableId,
     params.organizationId
   );
-  return buildAppsScriptConfig({
+  return {
     sheetTitle: params.sheetTitle,
     columns,
     groqApiKey: resolveAppsScriptGroqKey(),
     groqModel: resolveAppsScriptGroqModel(),
     triggerMinutes: params.triggerMinutes,
-    maxThreads: 50,
-    tableId: params.tableId,
-  });
+    maxThreads: 30,
+  };
 }
